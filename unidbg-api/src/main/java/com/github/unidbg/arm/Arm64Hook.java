@@ -2,8 +2,9 @@ package com.github.unidbg.arm;
 
 import com.github.unidbg.Emulator;
 import com.github.unidbg.Svc;
+import com.github.unidbg.arm.backend.Backend;
 import com.github.unidbg.memory.SvcMemory;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.sun.jna.Pointer;
 import keystone.Keystone;
 import keystone.KeystoneArchitecture;
@@ -12,8 +13,9 @@ import keystone.KeystoneMode;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import unicorn.Arm64Const;
-import unicorn.Unicorn;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 
 public abstract class Arm64Hook extends Arm64Svc {
@@ -31,11 +33,11 @@ public abstract class Arm64Hook extends Arm64Svc {
     }
 
     @Override
-    public final UnicornPointer onRegister(SvcMemory svcMemory, int svcNumber) {
-        try (Keystone keystone = new Keystone(KeystoneArchitecture.Arm64, KeystoneMode.LittleEndian)) {
-            KeystoneEncoded encoded;
-            if (enablePostCall) {
-                encoded = keystone.assemble(Arrays.asList(
+    public final UnidbgPointer onRegister(SvcMemory svcMemory, int svcNumber) {
+        byte[] code;
+        if (enablePostCall) {
+            try (Keystone keystone = new Keystone(KeystoneArchitecture.Arm64, KeystoneMode.LittleEndian)) {
+                KeystoneEncoded encoded = keystone.assemble(Arrays.asList(
                         "sub sp, sp, #0x10",
                         "stp x29, x30, [sp]",
                         "svc #0x" + Integer.toHexString(svcNumber),
@@ -53,26 +55,28 @@ public abstract class Arm64Hook extends Arm64Svc {
                         "ldp x29, x30, [sp]",
                         "add sp, sp, #0x10",
                         "ret"));
-            } else {
-                encoded = keystone.assemble(Arrays.asList(
-                        "svc #0x" + Integer.toHexString(svcNumber),
-                        "ldr x17, [sp], #0x8",
-                        "br x17")); // manipulated stack in handle
+                code = encoded.getMachineCode();
             }
-            byte[] code = encoded.getMachineCode();
-            UnicornPointer pointer = svcMemory.allocate(code.length, "Arm64Hook");
-            pointer.write(0, code, 0, code.length);
-            if (log.isDebugEnabled()) {
-                log.debug("ARM64 hook: pointer=" + pointer);
-            }
-            return pointer;
+        } else {
+            ByteBuffer buffer = ByteBuffer.allocate(12);
+            buffer.order(ByteOrder.LITTLE_ENDIAN);
+            buffer.putInt(Arm64Svc.assembleSvc(svcNumber)); // svc #0xsvcNumber
+            buffer.putInt(0xf84087f1); // ldr x17, [sp], #0x8
+            buffer.putInt(0xd61f0220); // br x17: manipulated stack in handle
+            code = buffer.array();
         }
+        UnidbgPointer pointer = svcMemory.allocate(code.length, "Arm64Hook");
+        pointer.write(0, code, 0, code.length);
+        if (log.isDebugEnabled()) {
+            log.debug("ARM64 hook: pointer=" + pointer);
+        }
+        return pointer;
     }
 
     @Override
     public final long handle(Emulator<?> emulator) {
-        Unicorn u = emulator.getUnicorn();
-        Pointer sp = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_SP);
+        Backend backend = emulator.getBackend();
+        Pointer sp = UnidbgPointer.register(emulator, Arm64Const.UC_ARM64_REG_SP);
         try {
             HookStatus status = hook(emulator);
             if (status.forward || !enablePostCall) {
@@ -85,7 +89,7 @@ public abstract class Arm64Hook extends Arm64Svc {
 
             return status.returnValue;
         } finally {
-            u.reg_write(Arm64Const.UC_ARM64_REG_SP, ((UnicornPointer) sp).peer);
+            backend.reg_write(Arm64Const.UC_ARM64_REG_SP, ((UnidbgPointer) sp).peer);
         }
     }
 

@@ -1,6 +1,8 @@
 package com.github.unidbg.linux.file;
 
 import com.github.unidbg.Emulator;
+import com.github.unidbg.Utils;
+import com.github.unidbg.arm.backend.Backend;
 import com.github.unidbg.file.FileIO;
 import com.github.unidbg.file.NewFileIO;
 import com.github.unidbg.file.linux.BaseAndroidFileIO;
@@ -13,12 +15,10 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import unicorn.Unicorn;
 
 import java.io.*;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
-import java.util.Arrays;
 
 public class SimpleFileIO extends BaseAndroidFileIO implements NewFileIO {
 
@@ -94,54 +94,8 @@ public class SimpleFileIO extends BaseAndroidFileIO implements NewFileIO {
     }
 
     @Override
-    public int read(Unicorn unicorn, Pointer buffer, final int _count) {
-        try {
-            int count = _count;
-            if (count > randomAccessFile.length() - randomAccessFile.getFilePointer()) {
-                count = (int) (randomAccessFile.length() - randomAccessFile.getFilePointer());
-
-                /*
-                 * lseek() allows the file offset to be set beyond the end of the file
-                 *        (but this does not change the size of the file).  If data is later
-                 *        written at this point, subsequent reads of the data in the gap (a
-                 *        "hole") return null bytes ('\0') until data is actually written into
-                 *        the gap.
-                 */
-                if (count < 0) {
-                    log.warn("read path=" + file + ", fp=" + randomAccessFile.getFilePointer() + ", _count=" + _count + ", length=" + randomAccessFile.length());
-                    return 0;
-                }
-            }
-
-            byte[] data = new byte[count];
-            int read = randomAccessFile.read(data);
-            if (read <= 0) {
-                if (log.isDebugEnabled()) {
-                    log.debug("read path=" + file + ", fp=" + randomAccessFile.getFilePointer() + ", _count=" + _count + ", length=" + randomAccessFile.length());
-                }
-                return read;
-            }
-
-            if (randomAccessFile.getFilePointer() > randomAccessFile.length()) {
-                throw new IllegalStateException("fp=" + randomAccessFile.getFilePointer() + ", length=" + randomAccessFile.length());
-            }
-
-            final byte[] buf;
-            if (read == count) {
-                buf = data;
-            } else if(read < count) {
-                buf = Arrays.copyOf(data, read);
-            } else {
-                throw new IllegalStateException("count=" + count + ", read=" + read);
-            }
-            if (log.isDebugEnabled() && buf.length < 0x3000) {
-                Inspector.inspect(buf, "read path=" + file + ", fp=" + randomAccessFile.getFilePointer() + ", _count=" + _count + ", length=" + randomAccessFile.length());
-            }
-            buffer.write(0, buf, 0, buf.length);
-            return buf.length;
-        } catch (IOException e) {
-            throw new IllegalStateException();
-        }
+    public int read(Backend backend, Pointer pointer, final int _count) {
+        return Utils.readFile(randomAccessFile, pointer, _count);
     }
 
     @Override
@@ -267,4 +221,8 @@ public class SimpleFileIO extends BaseAndroidFileIO implements NewFileIO {
         }
     }
 
+    @Override
+    public String getPath() {
+        return path;
+    }
 }

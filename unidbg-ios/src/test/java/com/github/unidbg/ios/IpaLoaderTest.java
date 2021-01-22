@@ -3,13 +3,14 @@ package com.github.unidbg.ios;
 import com.github.unidbg.Emulator;
 import com.github.unidbg.Module;
 import com.github.unidbg.Symbol;
+import com.github.unidbg.arm.backend.dynarmic.DynarmicLoader;
 import com.github.unidbg.file.ios.DarwinFileIO;
 import com.github.unidbg.ios.classdump.ClassDumper;
 import com.github.unidbg.ios.classdump.IClassDumper;
 import com.github.unidbg.ios.ipa.EmulatorConfigurator;
 import com.github.unidbg.ios.ipa.IpaLoader64;
 import com.github.unidbg.ios.ipa.LoadedIpa;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.sun.jna.Pointer;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
@@ -18,6 +19,10 @@ import java.io.File;
 import java.util.concurrent.Callable;
 
 public class IpaLoaderTest implements EmulatorConfigurator {
+
+    static {
+        DynarmicLoader.useDynarmic();
+    }
 
     public void testLoader() throws Exception {
         Logger.getLogger("com.github.unidbg.AbstractEmulator").setLevel(Level.INFO);
@@ -36,7 +41,7 @@ public class IpaLoaderTest implements EmulatorConfigurator {
                 System.out.println(objcClass);
 
                 Symbol _TelegramCoreVersionString = module.findSymbolByName("_TelegramCoreVersionString");
-                Pointer pointer = UnicornPointer.pointer(emulator, _TelegramCoreVersionString.getAddress());
+                Pointer pointer = UnidbgPointer.pointer(emulator, _TelegramCoreVersionString.getAddress());
                 assert pointer != null;
                 System.out.println("_TelegramCoreVersionString=" + pointer.getString(0));
                 return null;

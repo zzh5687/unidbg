@@ -4,7 +4,11 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 import java.io.IOException;
-import java.util.*;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * http://www.sco.com/developers/gabi/latest/ch5.dynamic.html#dynamic_section
@@ -329,8 +333,7 @@ public class ElfDynamicStructure {
 					byte[] magic = new byte[4];
 					parser.read(magic);
 					if (androidRelSize >= 4 && "APS2".equals(new String(magic))) {
-						byte[] androidRelData = new byte[androidRelSize - 4];
-						parser.read(androidRelData);
+						ByteBuffer androidRelData = parser.readBuffer(androidRelSize - 4);
 						return new AndroidRelocation(parser, symbolStructure.getValue(), androidRelData, false);
 					} else {
 						throw new IllegalStateException("bad android relocation header.");
@@ -346,8 +349,7 @@ public class ElfDynamicStructure {
 					byte[] magic = new byte[4];
 					parser.read(magic);
 					if (androidRelASize >= 4 && "APS2".equals(new String(magic))) {
-						byte[] androidRelData = new byte[androidRelASize - 4];
-						parser.read(androidRelData);
+						ByteBuffer androidRelData = parser.readBuffer(androidRelASize - 4);
 						return new AndroidRelocation(parser, symbolStructure.getValue(), androidRelData, true);
 					} else {
 						throw new IllegalStateException("bad android relocation header.");

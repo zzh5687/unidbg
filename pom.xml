@@ -4,14 +4,17 @@
     <groupId>com.github.zhkl0228</groupId>
     <artifactId>unidbg-parent</artifactId>
     <packaging>pom</packaging>
-    <version>0.6.0</version>
+    <version>0.9.3-SNAPSHOT</version>
     <modules>
         <module>unidbg-api</module>
         <module>unidbg-android</module>
         <module>unidbg-ios</module>
+        <module>unidbg-dynarmic</module>
+        <module>unidbg-hypervisor</module>
     </modules>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.test.skip>true</maven.test.skip>
     </properties>
     <name>unidbg</name>
     <description>Allows you to emulate an Android ARM32 and/or ARM64 native library</description>
@@ -99,7 +102,7 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>3.8.2</version>
+            <version>4.13.1</version>
             <scope>test</scope>
         </dependency>
         <dependency>

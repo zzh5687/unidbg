@@ -2,9 +2,10 @@ package com.sun.jna;
 
 import com.github.unidbg.*;
 import com.github.unidbg.arm.HookStatus;
+import com.github.unidbg.arm.backend.hypervisor.HypervisorLoader;
 import com.github.unidbg.arm.context.RegisterContext;
-import com.github.unidbg.debugger.DebuggerType;
-import com.github.unidbg.hook.*;
+import com.github.unidbg.hook.HookContext;
+import com.github.unidbg.hook.ReplaceCallback;
 import com.github.unidbg.hook.hookzz.Dobby;
 import com.github.unidbg.hook.hookzz.HookEntryInfo;
 import com.github.unidbg.hook.hookzz.IHookZz;
@@ -15,16 +16,24 @@ import com.github.unidbg.hook.xhook.IxHook;
 import com.github.unidbg.linux.android.AndroidARM64Emulator;
 import com.github.unidbg.linux.android.AndroidResolver;
 import com.github.unidbg.linux.android.XHookImpl;
-import com.github.unidbg.linux.android.dvm.*;
+import com.github.unidbg.linux.android.dvm.DalvikModule;
+import com.github.unidbg.linux.android.dvm.DvmClass;
+import com.github.unidbg.linux.android.dvm.DvmObject;
+import com.github.unidbg.linux.android.dvm.VM;
+import com.github.unidbg.linux.android.dvm.jni.ProxyClassFactory;
 import com.github.unidbg.memory.Memory;
 import com.github.unidbg.memory.MemoryBlock;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.github.unidbg.utils.Inspector;
 
 import java.io.File;
 import java.io.IOException;
 
-public class JniDispatch64 extends AbstractJni {
+public class JniDispatch64 {
+
+    static {
+        HypervisorLoader.useHypervisor();
+    }
 
     private static LibraryResolver createLibraryResolver() {
         return new AndroidResolver(23);
@@ -37,7 +46,7 @@ public class JniDispatch64 extends AbstractJni {
     private final AndroidEmulator emulator;
     private final Module module;
 
-    private final DvmClass Native;
+    private final DvmClass cNative;
 
     private JniDispatch64() {
         emulator = createARMEmulator();
@@ -45,13 +54,13 @@ public class JniDispatch64 extends AbstractJni {
         memory.setLibraryResolver(createLibraryResolver());
 
         VM vm = emulator.createDalvikVM(null);
-        vm.setJni(this);
+        vm.setDvmClassFactory(new ProxyClassFactory());
         vm.setVerbose(true);
         DalvikModule dm = vm.loadLibrary(new File("unidbg-android/src/test/resources/example_binaries/arm64-v8a/libjnidispatch.so"), false);
         dm.callJNI_OnLoad(emulator);
         this.module = dm.getModule();
 
-        Native = vm.resolveClass("com/sun/jna/Native");
+        cNative = vm.resolveClass("com/sun/jna/Native");
 
         Symbol __system_property_get = module.findSymbolByName("__system_property_get", true);
         MemoryBlock block = memory.malloc(0x10);
@@ -101,8 +110,8 @@ public class JniDispatch64 extends AbstractJni {
 
         long start = System.currentTimeMillis();
         final int size = 0x20;
-        Number ret = Native.callStaticJniMethodLong(emulator, "malloc(J)J", size);
-        Pointer pointer = UnicornPointer.pointer(emulator, ret.intValue() & 0xffffffffL);
+        Number ret = cNative.callStaticJniMethodLong(emulator, "malloc(J)J", size);
+        Pointer pointer = UnidbgPointer.pointer(emulator, ret.intValue() & 0xffffffffL);
         assert pointer != null;
         pointer.setString(0, getClass().getName());
         Inspector.inspect(pointer.getByteArray(0, size), "malloc ret=0x" + Long.toHexString(ret.longValue()) + ", offset=" + (System.currentTimeMillis() - start) + "ms");
@@ -118,24 +127,14 @@ public class JniDispatch64 extends AbstractJni {
             }
         });
 
-        StringObject version = Native.callStaticJniMethodObject(emulator, "getNativeVersion()Ljava/lang/String;");
+        DvmObject<?> version = cNative.callStaticJniMethodObject(emulator, "getNativeVersion()Ljava/lang/String;");
         System.out.println("getNativeVersion version=" + version.getValue() + ", offset=" + (System.currentTimeMillis() - start) + "ms");
 
-        StringObject checksum = Native.callStaticJniMethodObject(emulator, "getAPIChecksum()Ljava/lang/String;");
+        DvmObject<?> checksum = cNative.callStaticJniMethodObject(emulator, "getAPIChecksum()Ljava/lang/String;");
         System.out.println("getAPIChecksum checksum=" + checksum.getValue() + ", offset=" + (System.currentTimeMillis() - start) + "ms");
 
-        emulator.attach(DebuggerType.ANDROID_SERVER_V7);
-        ret = Native.callStaticJniMethodInt(emulator, "sizeof(I)I", 0);
+//        emulator.attach(DebuggerType.ANDROID_SERVER_V7);
+        ret = cNative.callStaticJniMethodInt(emulator, "sizeof(I)I", 0);
         System.out.println("sizeof POINTER_SIZE=" + ret.intValue() + ", offset=" + (System.currentTimeMillis() - start) + "ms");
-    }
-
-    @Override
-    public DvmObject<?> callStaticObjectMethod(BaseVM vm, DvmClass dvmClass, String signature, VarArg varArg) {
-        if ("java/lang/System->getProperty(Ljava/lang/String;)Ljava/lang/String;".equals(signature)) {
-            StringObject string = varArg.getObject(0);
-            return new StringObject(vm, System.getProperty(string.getValue()));
-        }
-
-        return super.callStaticObjectMethod(vm, dvmClass, signature, varArg);
     }
 }

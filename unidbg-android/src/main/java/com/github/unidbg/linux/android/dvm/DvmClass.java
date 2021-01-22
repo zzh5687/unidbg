@@ -3,7 +3,7 @@ package com.github.unidbg.linux.android.dvm;
 import com.github.unidbg.Emulator;
 import com.github.unidbg.Module;
 import com.github.unidbg.Symbol;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
@@ -11,24 +11,42 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
-public class DvmClass extends DvmObject<String> {
+public class DvmClass extends DvmObject<Class<?>> {
 
     private static final Log log = LogFactory.getLog(DvmClass.class);
 
     private static final String ROOT_CLASS = "java/lang/Class";
 
     public final BaseVM vm;
+    private final DvmClass superClass;
     private final DvmClass[] interfaceClasses;
+    private final String className;
 
-    protected DvmClass(BaseVM vm, String className, DvmClass[] interfaceClasses) {
-        super(ROOT_CLASS.equals(className) ? null : vm.resolveClass(ROOT_CLASS), className);
+    protected DvmClass(BaseVM vm, String className, DvmClass superClass, DvmClass[] interfaceClasses) {
+        this(vm, className, superClass, interfaceClasses, null);
+    }
+
+    protected DvmClass(BaseVM vm, String className, DvmClass superClass, DvmClass[] interfaceClasses, Class<?> value) {
+        super(ROOT_CLASS.equals(className) ? null : vm.resolveClass(ROOT_CLASS), value);
         this.vm = vm;
+        this.superClass = superClass;
         this.interfaceClasses = interfaceClasses;
+        this.className = className;
+    }
+
+    @SuppressWarnings("unused")
+    public DvmClass getSuperclass() {
+        return superClass;
+    }
+
+    @SuppressWarnings("unused")
+    public DvmClass[] getInterfaces() {
+        return interfaceClasses;
     }
 
     @Override
     public DvmClass getObjectType() {
-        if (ROOT_CLASS.equals(value)) {
+        if (ROOT_CLASS.equals(className)) {
             return this;
         }
 
@@ -36,11 +54,11 @@ public class DvmClass extends DvmObject<String> {
     }
 
     public String getClassName() {
-        return value;
+        return className;
     }
 
     public String getName() {
-        return value.replace('/', '.');
+        return className.replace('/', '.');
     }
 
     public DvmObject<?> newObject(Object value) {
@@ -55,14 +73,16 @@ public class DvmClass extends DvmObject<String> {
             log.debug("allocObject signature=" + signature);
         }
         BaseVM vm = this.vm;
-        checkJni(vm);
-        return vm.jni.allocObject(vm, this, signature);
+        return checkJni(vm, this).allocObject(vm, this, signature);
     }
 
     private final Map<Integer, DvmMethod> staticMethodMap = new HashMap<>();
 
     final DvmMethod getStaticMethod(int hash) {
         DvmMethod method = staticMethodMap.get(hash);
+        if (method == null && superClass != null) {
+            method = superClass.getStaticMethod(hash);
+        }
         if (method == null) {
             for (DvmClass interfaceClass : interfaceClasses) {
                 method = interfaceClass.getStaticMethod(hash);
@@ -80,9 +100,10 @@ public class DvmClass extends DvmObject<String> {
         if (log.isDebugEnabled()) {
             log.debug("getStaticMethodID signature=" + signature + ", hash=0x" + Long.toHexString(hash));
         }
-        checkJni(vm);
-        if (vm.jni.acceptMethod(this, signature, true)) {
-            staticMethodMap.put(hash, new DvmMethod(this, methodName, args, true));
+        if (checkJni(vm, this).acceptMethod(this, signature, true)) {
+            if (!staticMethodMap.containsKey(hash)) {
+                staticMethodMap.put(hash, new DvmMethod(this, methodName, args, true));
+            }
             return hash;
         } else {
             return 0;
@@ -93,6 +114,9 @@ public class DvmClass extends DvmObject<String> {
 
     final DvmMethod getMethod(int hash) {
         DvmMethod method = methodMap.get(hash);
+        if (method == null && superClass != null) {
+            method = superClass.getMethod(hash);
+        }
         if (method == null) {
             for (DvmClass interfaceClass : interfaceClasses) {
                 method = interfaceClass.getMethod(hash);
@@ -111,7 +135,9 @@ public class DvmClass extends DvmObject<String> {
             log.debug("getMethodID signature=" + signature + ", hash=0x" + Long.toHexString(hash));
         }
         if (vm.jni == null || vm.jni.acceptMethod(this, signature, false)) {
-            methodMap.put(hash, new DvmMethod(this, methodName, args, false));
+            if (!methodMap.containsKey(hash)) {
+                methodMap.put(hash, new DvmMethod(this, methodName, args, false));
+            }
             return hash;
         } else {
             return 0;
@@ -122,6 +148,9 @@ public class DvmClass extends DvmObject<String> {
 
     final DvmField getField(int hash) {
         DvmField field = fieldMap.get(hash);
+        if (field == null && superClass != null) {
+            field = superClass.getField(hash);
+        }
         if (field == null) {
             for (DvmClass interfaceClass : interfaceClasses) {
                 field = interfaceClass.getField(hash);
@@ -140,7 +169,9 @@ public class DvmClass extends DvmObject<String> {
             log.debug("getFieldID signature=" + signature + ", hash=0x" + Long.toHexString(hash));
         }
         if (vm.jni == null || vm.jni.acceptField(this, signature, false)) {
-            fieldMap.put(hash, new DvmField(this, fieldName, fieldType));
+            if (!fieldMap.containsKey(hash)) {
+                fieldMap.put(hash, new DvmField(this, fieldName, fieldType, false));
+            }
             return hash;
         } else {
             return 0;
@@ -151,6 +182,9 @@ public class DvmClass extends DvmObject<String> {
 
     final DvmField getStaticField(int hash) {
         DvmField field = staticFieldMap.get(hash);
+        if (field == null && superClass != null) {
+            field = superClass.getStaticField(hash);
+        }
         if (field == null) {
             for (DvmClass interfaceClass : interfaceClasses) {
                 field = interfaceClass.getStaticField(hash);
@@ -169,7 +203,9 @@ public class DvmClass extends DvmObject<String> {
             log.debug("getStaticFieldID signature=" + signature + ", hash=0x" + Long.toHexString(hash));
         }
         if (vm.jni == null || vm.jni.acceptField(this, signature, true)) {
-            staticFieldMap.put(hash, new DvmField(this, fieldName, fieldType));
+            if (!staticFieldMap.containsKey(hash)) {
+                staticFieldMap.put(hash, new DvmField(this, fieldName, fieldType, true));
+            }
             return hash;
         } else {
             return 0;
@@ -194,17 +230,17 @@ public class DvmClass extends DvmObject<String> {
         return "class " + getClassName();
     }
 
-    final Map<String, UnicornPointer> nativesMap = new HashMap<>();
+    final Map<String, UnidbgPointer> nativesMap = new HashMap<>();
 
-    UnicornPointer findNativeFunction(Emulator<?> emulator, String method) {
-        UnicornPointer fnPtr = nativesMap.get(method);
+    UnidbgPointer findNativeFunction(Emulator<?> emulator, String method) {
+        UnidbgPointer fnPtr = nativesMap.get(method);
         int index = method.indexOf('(');
         if (fnPtr == null && index != -1) {
-            String symbolName = "Java_" + getClassName().replace('/', '_') + "_" + method.substring(0, index);
+            String symbolName = "Java_" + getClassName().replace("_", "_1").replace('/', '_') + "_" + method.substring(0, index);
             for (Module module : emulator.getMemory().getLoadedModules()) {
                 Symbol symbol = module.findSymbolByName(symbolName, false);
                 if (symbol != null) {
-                    fnPtr = (UnicornPointer) symbol.createPointer(emulator);
+                    fnPtr = (UnidbgPointer) symbol.createPointer(emulator);
                     break;
                 }
             }
@@ -213,7 +249,7 @@ public class DvmClass extends DvmObject<String> {
             throw new IllegalArgumentException("find method failed: " + method);
         }
         if (vm.verbose) {
-            System.out.println(String.format("Find native function %s => %s", "Java_" + getClassName().replace('/', '_') + "_" + method, fnPtr));
+            System.out.printf("Find native function %s => %s%n", "Java_" + getClassName().replace('/', '_') + "_" + method, fnPtr);
         }
         return fnPtr;
     }
@@ -224,6 +260,11 @@ public class DvmClass extends DvmObject<String> {
         } finally {
             vm.deleteLocalRefs();
         }
+    }
+
+    @SuppressWarnings("unused")
+    public boolean callStaticJniMethodBoolean(Emulator<?> emulator, String method, Object...args) {
+        return callStaticJniMethodInt(emulator, method, args) == VM.JNI_TRUE;
     }
 
     @SuppressWarnings("unused")
@@ -259,6 +300,9 @@ public class DvmClass extends DvmObject<String> {
             return true;
         }
 
+        if (superClass != null && dvmClass == superClass) {
+            return true;
+        }
         for (DvmClass dc : interfaceClasses) {
             if (dc == dvmClass) {
                 return true;

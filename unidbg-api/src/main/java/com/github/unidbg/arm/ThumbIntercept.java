@@ -4,26 +4,23 @@ import capstone.Arm;
 import capstone.Arm_const;
 import capstone.Capstone;
 import com.github.unidbg.Emulator;
-import com.github.unidbg.memory.SvcMemory;
+import com.github.unidbg.arm.backend.Backend;
+import com.github.unidbg.arm.backend.BackendException;
 import com.github.unidbg.hook.InterceptCallback;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.memory.SvcMemory;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.sun.jna.Pointer;
 import keystone.Keystone;
 import keystone.KeystoneArchitecture;
 import keystone.KeystoneEncoded;
 import keystone.KeystoneMode;
 import unicorn.ArmConst;
-import unicorn.Unicorn;
-import unicorn.UnicornException;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * Use HookZz
- */
-public class ThumbIntercept extends ThumbSvc {
+class ThumbIntercept extends ThumbSvc {
 
     private final Pointer pointer;
     private final InterceptCallback callback;
@@ -38,7 +35,7 @@ public class ThumbIntercept extends ThumbSvc {
     }
 
     @Override
-    public UnicornPointer onRegister(SvcMemory svcMemory, int svcNumber) {
+    public UnidbgPointer onRegister(SvcMemory svcMemory, int svcNumber) {
         if (svcNumber < 0 || svcNumber > 0xff) {
             throw new IllegalStateException("service number out of range");
         }
@@ -62,46 +59,46 @@ public class ThumbIntercept extends ThumbSvc {
 
     @Override
     public long handle(Emulator<?> emulator) {
-        Unicorn u = emulator.getUnicorn();
+        Backend backend = emulator.getBackend();
         if (callback != null) {
             callback.onIntercept(emulator);
         }
-        eval(u, emulator);
-        return ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        eval(backend, emulator);
+        return backend.reg_read(ArmConst.UC_ARM_REG_R0).intValue();
     }
 
-    private void eval(Unicorn u, Emulator<?> emulator) {
+    private void eval(Backend backend, Emulator<?> emulator) {
         switch (insn.mnemonic) {
             case "push":
-                evalPush(u, emulator);
+                evalPush(backend, emulator);
                 break;
             case "mul":
             case "muls":
-                evalMul(u);
+                evalMul(backend);
                 break;
             case "sub":
             case "subs":
-                evalSub(u);
+                evalSub(backend);
                 break;
             case "add":
-                evalAdd(u);
+                evalAdd(backend);
                 break;
             case "bl":
-                evalBL(u, false, emulator);
+                evalBL(backend, false, emulator);
                 break;
             case "blx":
-                evalBL(u, true, emulator);
+                evalBL(backend, true, emulator);
                 break;
             default:
-                throw new UnicornException(insn.mnemonic + " " + insn.opStr);
+                throw new BackendException(insn.mnemonic + " " + insn.opStr);
         }
     }
 
-    private void evalBL(Unicorn u, boolean x, Emulator<?> emulator) {
-        Pointer sp = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_SP);
+    private void evalBL(Backend backend, boolean x, Emulator<?> emulator) {
+        Pointer sp = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_SP);
         try {
-            Pointer pc = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_PC);
-            u.reg_write(ArmConst.UC_ARM_REG_LR, ((UnicornPointer) pc.share(2)).peer | 1L); // thumb
+            Pointer pc = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_PC);
+            backend.reg_write(ArmConst.UC_ARM_REG_LR, ((UnidbgPointer) pc.share(2)).peer | 1L); // thumb
             sp = sp.share(-4);
 
             Arm.OpInfo opInfo = (Arm.OpInfo) this.insn.operands;
@@ -112,23 +109,23 @@ public class ThumbIntercept extends ThumbSvc {
             }
             sp.setPointer(0, pc);
         } finally {
-            u.reg_write(ArmConst.UC_ARM_REG_SP, ((UnicornPointer) sp).peer);
+            backend.reg_write(ArmConst.UC_ARM_REG_SP, ((UnidbgPointer) sp).peer);
         }
     }
 
-    private void evalAdd(Unicorn u) {
+    private void evalAdd(Backend backend) {
         Arm.OpInfo opInfo = (Arm.OpInfo) this.insn.operands;
         int opCount = opInfo.op.length;
         if (opCount != 2 && opCount != 3) {
-            throw new UnicornException("opCount=" + opCount);
+            throw new BackendException("opCount=" + opCount);
         }
 
-        long o1 = ((Number) u.reg_read(opInfo.op[opCount - 2].value.reg)).intValue() & 0xffffffffL;
-        long o2 = getOperandValue(u, opInfo.op[opCount - 1]) & 0xffffffffL;
+        long o1 = backend.reg_read(opInfo.op[opCount - 2].value.reg).intValue() & 0xffffffffL;
+        long o2 = getOperandValue(backend, opInfo.op[opCount - 1]) & 0xffffffffL;
         long result = o1 + o2;
-        u.reg_write(opInfo.op[0].value.reg, (int) result);
+        backend.reg_write(opInfo.op[0].value.reg, (int) result);
         if (opInfo.updateFlags) {
-            Cpsr cpsr = Cpsr.getArm(u);
+            Cpsr cpsr = Cpsr.getArm(backend);
             cpsr.setNegative((int) result < 0);
             cpsr.setZero(result == 0);
             cpsr.setCarry(result >= 0x100000000L);
@@ -137,19 +134,19 @@ public class ThumbIntercept extends ThumbSvc {
         }
     }
 
-    private void evalSub(Unicorn u) {
+    private void evalSub(Backend backend) {
         Arm.OpInfo opInfo = (Arm.OpInfo) this.insn.operands;
         int opCount = opInfo.op.length;
         if (opCount != 2 && opCount != 3) {
-            throw new UnicornException("opCount=" + opCount);
+            throw new BackendException("opCount=" + opCount);
         }
 
-        int o1 = ((Number) u.reg_read(opInfo.op[opCount - 2].value.reg)).intValue();
-        int o2 = getOperandValue(u, opInfo.op[opCount - 1]);
+        int o1 = backend.reg_read(opInfo.op[opCount - 2].value.reg).intValue();
+        int o2 = getOperandValue(backend, opInfo.op[opCount - 1]);
         int result = o1 - o2;
-        u.reg_write(opInfo.op[0].value.reg, result);
+        backend.reg_write(opInfo.op[0].value.reg, result);
         if (opInfo.updateFlags) {
-            Cpsr cpsr = Cpsr.getArm(u);
+            Cpsr cpsr = Cpsr.getArm(backend);
             cpsr.setNegative(result < 0);
             cpsr.setZero(result == 0);
             cpsr.setCarry(result >= 0);
@@ -158,10 +155,10 @@ public class ThumbIntercept extends ThumbSvc {
         }
     }
 
-    private int getOperandValue(Unicorn u, Arm.Operand op) {
+    private int getOperandValue(Backend backend, Arm.Operand op) {
         switch (op.type) {
             case capstone.Arm_const.ARM_OP_REG:
-                int value = ((Number) u.reg_read(op.value.reg)).intValue();
+                int value = backend.reg_read(op.value.reg).intValue();
                 if (op.value.reg == ArmConst.UC_ARM_REG_PC) {
                     value += 2;
                 }
@@ -169,29 +166,29 @@ public class ThumbIntercept extends ThumbSvc {
             case Arm_const.ARM_OP_IMM:
                 return op.value.imm;
             default:
-                throw new UnicornException("op.type=" + op.type);
+                throw new BackendException("op.type=" + op.type);
         }
     }
 
-    private void evalMul(Unicorn u) {
+    private void evalMul(Backend backend) {
         Arm.OpInfo opInfo = (Arm.OpInfo) this.insn.operands;
         int opCount = opInfo.op.length;
         if (opCount != 2 && opCount != 3) {
-            throw new UnicornException("opCount=" + opCount);
+            throw new BackendException("opCount=" + opCount);
         }
-        long o1 = ((Number) u.reg_read(opInfo.op[opCount - 2].value.reg)).intValue() & 0xffffffffL;
-        long o2 = ((Number) u.reg_read(opInfo.op[opCount - 1].value.reg)).intValue() & 0xffffffffL;
+        long o1 = backend.reg_read(opInfo.op[opCount - 2].value.reg).intValue() & 0xffffffffL;
+        long o2 = backend.reg_read(opInfo.op[opCount - 1].value.reg).intValue() & 0xffffffffL;
         int result = (int) (o1 * o2);
-        u.reg_write(opInfo.op[0].value.reg, result);
+        backend.reg_write(opInfo.op[0].value.reg, result);
         if (opInfo.updateFlags) {
-            Cpsr cpsr = Cpsr.getArm(u);
+            Cpsr cpsr = Cpsr.getArm(backend);
             cpsr.setNegative(result < 0);
             cpsr.setZero(result == 0);
         }
     }
 
-    private void evalPush(Unicorn u, Emulator<?> emulator) {
-        Pointer sp = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_SP);
+    private void evalPush(Backend backend, Emulator<?> emulator) {
+        Pointer sp = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_SP);
         Arm.OpInfo opInfo = (Arm.OpInfo) this.insn.operands;
         List<Arm.Operand> operandList = new ArrayList<>(opInfo.op.length);
         Collections.addAll(operandList, opInfo.op);
@@ -199,10 +196,10 @@ public class ThumbIntercept extends ThumbSvc {
         try {
             for (Arm.Operand operand : operandList) {
                 sp = sp.share(-4);
-                sp.setPointer(0, UnicornPointer.register(emulator, operand.value.reg));
+                sp.setPointer(0, UnidbgPointer.register(emulator, operand.value.reg));
             }
         } finally {
-            u.reg_write(ArmConst.UC_ARM_REG_SP, ((UnicornPointer) sp).peer);
+            backend.reg_write(ArmConst.UC_ARM_REG_SP, ((UnidbgPointer) sp).peer);
         }
     }
 

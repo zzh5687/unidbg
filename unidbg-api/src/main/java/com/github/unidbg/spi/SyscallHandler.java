@@ -1,17 +1,19 @@
 package com.github.unidbg.spi;
 
 import com.github.unidbg.Emulator;
+import com.github.unidbg.arm.backend.InterruptHook;
 import com.github.unidbg.debugger.Breaker;
 import com.github.unidbg.file.IOResolver;
 import com.github.unidbg.file.NewFileIO;
-import unicorn.InterruptHook;
+import com.github.unidbg.serialize.Serializable;
+import com.github.unidbg.unix.FileListener;
 
 /**
  * syscall handler
  * Created by zhkl0228 on 2017/5/9.
  */
 
-public interface SyscallHandler<T extends NewFileIO> extends InterruptHook {
+public interface SyscallHandler<T extends NewFileIO> extends InterruptHook, Serializable {
 
     int DARWIN_SWI_SYSCALL = 0x80;
 
@@ -24,6 +26,7 @@ public interface SyscallHandler<T extends NewFileIO> extends InterruptHook {
 
     void setVerbose(boolean verbose);
     boolean isVerbose();
+    void setFileListener(FileListener fileListener);
 
     void setBreaker(Breaker breaker);
 

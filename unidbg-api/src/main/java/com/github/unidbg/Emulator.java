@@ -1,5 +1,6 @@
 package com.github.unidbg;
 
+import com.github.unidbg.arm.backend.Backend;
 import com.github.unidbg.arm.context.RegisterContext;
 import com.github.unidbg.debugger.Debugger;
 import com.github.unidbg.debugger.DebuggerType;
@@ -10,9 +11,9 @@ import com.github.unidbg.listener.TraceReadListener;
 import com.github.unidbg.listener.TraceWriteListener;
 import com.github.unidbg.memory.Memory;
 import com.github.unidbg.memory.SvcMemory;
+import com.github.unidbg.serialize.Serializable;
 import com.github.unidbg.spi.*;
 import com.github.unidbg.unwind.Unwinder;
-import unicorn.Unicorn;
 
 import java.io.Closeable;
 import java.io.File;
@@ -24,7 +25,7 @@ import java.net.URL;
  * Created by zhkl0228 on 2017/5/2.
  */
 
-public interface Emulator<T extends NewFileIO> extends Closeable, Disassembler, ValuePair {
+public interface Emulator<T extends NewFileIO> extends Closeable, Disassembler, ValuePair, Serializable {
 
     int getPointerSize();
 
@@ -36,19 +37,15 @@ public interface Emulator<T extends NewFileIO> extends Closeable, Disassembler, 
     /**
      * trace memory read
      */
-    @SuppressWarnings("unused")
     Emulator<T> traceRead();
     Emulator<T> traceRead(long begin, long end);
-    @SuppressWarnings("unused")
     Emulator<T> traceRead(long begin, long end, TraceReadListener listener);
 
     /**
      * trace memory write
      */
-    @SuppressWarnings("unused")
     Emulator<T> traceWrite();
     Emulator<T> traceWrite(long begin, long end);
-    @SuppressWarnings("unused")
     Emulator<T> traceWrite(long begin, long end, TraceWriteListener listener);
 
     /**
@@ -62,10 +59,8 @@ public interface Emulator<T extends NewFileIO> extends Closeable, Disassembler, 
     /**
      * redirect trace out
      */
-    @SuppressWarnings("unused")
     void redirectTrace(File outFile);
 
-    @SuppressWarnings("unused")
     void runAsm(String...asm);
 
     Number[] eFunc(long begin, Number... arguments);
@@ -79,12 +74,12 @@ public interface Emulator<T extends NewFileIO> extends Closeable, Disassembler, 
      * @param begin start address
      * @param until stop address
      */
-    Unicorn eBlock(long begin, long until);
+    @Deprecated
+    void eBlock(long begin, long until);
 
     /**
      * 是否正在运行
      */
-    @SuppressWarnings("unused")
     boolean isRunning();
 
     /**
@@ -100,11 +95,9 @@ public interface Emulator<T extends NewFileIO> extends Closeable, Disassembler, 
     Module loadLibrary(File libraryFile) throws IOException;
     Module loadLibrary(File libraryFile, boolean forceCallInit) throws IOException;
 
-    Alignment align(long addr, long size);
-
     Memory getMemory();
 
-    Unicorn getUnicorn();
+    Backend getBackend();
 
     int getPid();
 
@@ -121,7 +114,6 @@ public interface Emulator<T extends NewFileIO> extends Closeable, Disassembler, 
     SyscallHandler<T> getSyscallHandler();
 
     Family getFamily();
-    @SuppressWarnings("unused")
     LibraryFile createURLibraryFile(URL url, String libName);
 
     Dlfcn getDlfcn();

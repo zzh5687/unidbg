@@ -1,11 +1,11 @@
 package com.github.unidbg.debugger.gdb;
 
 import com.github.unidbg.Emulator;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.arm.backend.BackendException;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.sun.jna.Pointer;
 import org.apache.commons.codec.DecoderException;
 import org.apache.commons.codec.binary.Hex;
-import unicorn.UnicornException;
 
 class MemoryCommand implements GdbStubCommand {
 
@@ -14,7 +14,7 @@ class MemoryCommand implements GdbStubCommand {
         try {
             int divider = command.indexOf(",");
             long address = Long.parseLong(command.substring(1, divider), 16);
-            Pointer pointer = UnicornPointer.pointer(emulator, address);
+            Pointer pointer = UnidbgPointer.pointer(emulator, address);
             if (pointer == null) {
                 stub.makePacketAndSend("E01");
                 return true;
@@ -32,7 +32,7 @@ class MemoryCommand implements GdbStubCommand {
                 stub.makePacketAndSend("OK");
                 return true;
             }
-        } catch (UnicornException e) {
+        } catch (BackendException e) {
             stub.makePacketAndSend("E01");
             return true;
         } catch (DecoderException e) {

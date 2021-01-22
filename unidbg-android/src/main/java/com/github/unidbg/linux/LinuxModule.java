@@ -1,16 +1,18 @@
 package com.github.unidbg.linux;
 
-import com.github.unidbg.*;
+import com.github.unidbg.Alignment;
+import com.github.unidbg.Emulator;
+import com.github.unidbg.Module;
+import com.github.unidbg.Symbol;
+import com.github.unidbg.arm.ARM;
 import com.github.unidbg.memory.MemRegion;
 import com.github.unidbg.memory.Memory;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.github.unidbg.spi.InitFunction;
 import com.github.unidbg.utils.Inspector;
 import com.github.unidbg.virtualmodule.VirtualSymbol;
 import com.sun.jna.Pointer;
-import net.fornwall.jelf.ArmExIdx;
-import net.fornwall.jelf.ElfSymbol;
-import net.fornwall.jelf.SymbolLocator;
+import net.fornwall.jelf.*;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
@@ -21,21 +23,21 @@ public class LinuxModule extends Module {
 
     private static final Log log = LogFactory.getLog(LinuxModule.class);
 
-    static LinuxModule createVirtualModule(String name, final Map<String, UnicornPointer> symbols, Emulator<?> emulator) {
+    static LinuxModule createVirtualModule(String name, final Map<String, UnidbgPointer> symbols, Emulator<?> emulator) {
         if (symbols.isEmpty()) {
             throw new IllegalArgumentException("symbols is empty");
         }
 
-        List<UnicornPointer> list = new ArrayList<>(symbols.values());
-        Collections.sort(list, new Comparator<UnicornPointer>() {
+        List<UnidbgPointer> list = new ArrayList<>(symbols.values());
+        Collections.sort(list, new Comparator<UnidbgPointer>() {
             @Override
-            public int compare(UnicornPointer o1, UnicornPointer o2) {
+            public int compare(UnidbgPointer o1, UnidbgPointer o2) {
                 return (int) (o1.peer - o2.peer);
             }
         });
-        UnicornPointer first = list.get(0);
-        UnicornPointer last = list.get(list.size() - 1);
-        Alignment alignment = emulator.align(first.peer, last.peer - first.peer);
+        UnidbgPointer first = list.get(0);
+        UnidbgPointer last = list.get(list.size() - 1);
+        Alignment alignment = ARM.align(first.peer, last.peer - first.peer, emulator.getPageAlign());
         final long base = alignment.address;
         final long size = alignment.size;
 
@@ -45,10 +47,10 @@ public class LinuxModule extends Module {
 
         LinuxModule module = new LinuxModule(base, size, name, null,
                 Collections.<ModuleSymbol>emptyList(), Collections.<InitFunction>emptyList(),
-                Collections.<String, Module>emptyMap(), Collections.<MemRegion>emptyList(), null) {
+                Collections.<String, Module>emptyMap(), Collections.<MemRegion>emptyList(), null, null) {
             @Override
             public Symbol findSymbolByName(String name, boolean withDependencies) {
-                UnicornPointer pointer = symbols.get(name);
+                UnidbgPointer pointer = symbols.get(name);
                 if (pointer != null) {
                     return new VirtualSymbol(name, this, pointer.peer);
                 } else {
@@ -64,7 +66,7 @@ public class LinuxModule extends Module {
                 return true;
             }
         };
-        for (Map.Entry<String, UnicornPointer> entry : symbols.entrySet()) {
+        for (Map.Entry<String, UnidbgPointer> entry : symbols.entrySet()) {
             module.registerSymbol(entry.getKey(), entry.getValue().peer);
         }
         return module;
@@ -73,17 +75,19 @@ public class LinuxModule extends Module {
     private final SymbolLocator dynsym;
     private final List<ModuleSymbol> unresolvedSymbol;
     public final List<InitFunction> initFunctionList;
-    public final ArmExIdx armExIdx;
+    public final MemoizedObject<ArmExIdx> armExIdx;
+    public final MemoizedObject<GnuEhFrameHeader> ehFrameHeader;
 
     LinuxModule(long base, long size, String name, SymbolLocator dynsym,
                 List<ModuleSymbol> unresolvedSymbol, List<InitFunction> initFunctionList, Map<String, Module> neededLibraries, List<MemRegion> regions,
-                ArmExIdx armExIdx) {
+                MemoizedObject<ArmExIdx> armExIdx, MemoizedObject<GnuEhFrameHeader> ehFrameHeader) {
         super(name, base, size, neededLibraries, regions);
 
         this.dynsym = dynsym;
         this.unresolvedSymbol = unresolvedSymbol;
         this.initFunctionList = initFunctionList;
         this.armExIdx = armExIdx;
+        this.ehFrameHeader = ehFrameHeader;
     }
 
     void callInitFunction(Emulator<?> emulator, boolean mustCallInit) throws IOException {
@@ -146,7 +150,7 @@ public class LinuxModule extends Module {
         }
 
         Memory memory = emulator.getMemory();
-        final UnicornPointer stack = memory.allocateStack(0);
+        final UnidbgPointer stack = memory.allocateStack(0);
 
         int argc = 0;
         List<Pointer> argv = new ArrayList<>();
@@ -183,12 +187,12 @@ public class LinuxModule extends Module {
             pointer.setPointer(0, arg);
         }
 
-        UnicornPointer kernelArgumentBlock = memory.allocateStack(emulator.getPointerSize());
+        UnidbgPointer kernelArgumentBlock = memory.allocateStack(emulator.getPointerSize());
         assert kernelArgumentBlock != null;
         kernelArgumentBlock.setInt(0, argc);
 
         if (log.isDebugEnabled()) {
-            UnicornPointer sp = memory.allocateStack(0);
+            UnidbgPointer sp = memory.allocateStack(0);
             byte[] data = sp.getByteArray(0, (int) (stack.peer - sp.peer));
             Inspector.inspect(data, "kernelArgumentBlock=" + kernelArgumentBlock + ", envPointer=" + envPointer + ", auxvPointer=" + auxvPointer);
         }

@@ -1,6 +1,7 @@
 #include <objc/runtime.h>
 #import <Foundation/Foundation.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
+#import <CoreTelephony/CTCall.h>
 #import <UIKit/UIKit.h>
 #import <SystemConfiguration/SystemConfiguration.h>
 #import <SystemConfiguration/CaptiveNetwork.h>
@@ -39,7 +40,7 @@ static CFMutableDictionaryRef makeDictionary() {
 -(void) testObjc {
   CTTelephonyNetworkInfo *info = [[CTTelephonyNetworkInfo alloc]init];
   CTCarrier *carrier = [info subscriberCellularProvider];
-  NSLog(@"CTTelephonyNetworkInfo: carrier=%@", carrier);
+  NSLog(@"CTTelephonyNetworkInfo: carrier=%@, CTCallStateDisconnected=%@", carrier, CTCallStateDisconnected);
 
   NSString *scope_key = [[NSString alloc] initWithCString: "__SCOPED__" encoding: NSUTF8StringEncoding];
 
@@ -82,7 +83,7 @@ static CFMutableDictionaryRef makeDictionary() {
   NSLog(@"NSUserDefaults name=%@, synchronize=%d", name, success);
 
   NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
-  NSLog(@"NSURLSessionConfiguration configuration=%@", configuration);
+  NSLog(@"NSURLSessionConfiguration configuration=%@, NSUUID=%@", configuration, [[NSUUID new] UUIDString]);
 }
 -(NSString *) description {
   return @"This is ObjC TEST";

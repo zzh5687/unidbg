@@ -2,6 +2,7 @@ package com.github.unidbg.ios;
 
 import com.github.unidbg.*;
 import com.github.unidbg.arm.*;
+import com.github.unidbg.arm.backend.BackendException;
 import com.github.unidbg.arm.context.Arm32RegisterContext;
 import com.github.unidbg.arm.context.Arm64RegisterContext;
 import com.github.unidbg.file.FileIO;
@@ -17,9 +18,8 @@ import com.github.unidbg.ios.struct.kernel.VmRemapRequest;
 import com.github.unidbg.ios.struct.sysctl.DyldImageInfo32;
 import com.github.unidbg.ios.struct.sysctl.DyldImageInfo64;
 import com.github.unidbg.memory.*;
-import com.github.unidbg.memory.MemRegion;
-import com.github.unidbg.pointer.UnicornPointer;
-import com.github.unidbg.pointer.UnicornStructure;
+import com.github.unidbg.pointer.UnidbgPointer;
+import com.github.unidbg.pointer.UnidbgStructure;
 import com.github.unidbg.spi.AbstractLoader;
 import com.github.unidbg.spi.LibraryFile;
 import com.github.unidbg.spi.Loader;
@@ -32,7 +32,10 @@ import io.kaitai.struct.ByteBufferKaitaiStream;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import unicorn.*;
+import unicorn.Arm64Const;
+import unicorn.ArmConst;
+import unicorn.Unicorn;
+import unicorn.UnicornConst;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -59,7 +62,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         }
 
         stackSize = STACK_SIZE_OF_PAGE * emulator.getPageAlign();
-        unicorn.mem_map(stackBase - stackSize, stackSize, UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE);
+        backend.mem_map(stackBase - stackSize, stackSize, UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE);
 
         setStackPoint(stackBase);
         initializeTSD(envs);
@@ -89,7 +92,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         this.objcRuntime = objcRuntime;
     }
 
-    private UnicornPointer vars;
+    private UnidbgPointer vars;
     private Pointer errno;
 
     final void setErrnoPointer(Pointer errno) {
@@ -97,9 +100,9 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         this.setErrno(0);
     }
 
-    private static final int __TSD_THREAD_SELF = 0;
-    private static final int __TSD_ERRNO = 1;
-    private static final int __TSD_MIG_REPLY = 2;
+    private static final long __TSD_THREAD_SELF = 0;
+    private static final long __TSD_ERRNO = 1;
+    private static final long __TSD_MIG_REPLY = 2;
 //    private static final int __PTK_FRAMEWORK_OBJC_KEY5 = 0x2d;
 
     private void initializeTSD(String[] envs) {
@@ -121,7 +124,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         }
         pointer.setPointer(0, null);
 
-        UnicornPointer _NSGetEnviron = allocateStack(emulator.getPointerSize());
+        UnidbgPointer _NSGetEnviron = allocateStack(emulator.getPointerSize());
         _NSGetEnviron.setPointer(0, environ);
 
         final Pointer programName = writeStackString(emulator.getProcessName());
@@ -139,24 +142,24 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         vars = allocateStack(emulator.getPointerSize() * 5);
         vars.setPointer(0, null); // _NSGetMachExecuteHeader
         vars.setPointer(emulator.getPointerSize(), _NSGetArgc);
-        vars.setPointer(2 * emulator.getPointerSize(), _NSGetArgv);
-        vars.setPointer(3 * emulator.getPointerSize(), _NSGetEnviron);
-        vars.setPointer(4 * emulator.getPointerSize(), _NSGetProgname);
+        vars.setPointer(2L * emulator.getPointerSize(), _NSGetArgv);
+        vars.setPointer(3L * emulator.getPointerSize(), _NSGetEnviron);
+        vars.setPointer(4L * emulator.getPointerSize(), _NSGetProgname);
 
-        final UnicornPointer thread = allocateStack(UnicornStructure.calculateSize(emulator.is64Bit() ? Pthread64.class : Pthread32.class)); // reserve space for pthread_internal_t
+        final UnidbgPointer thread = allocateStack(UnidbgStructure.calculateSize(emulator.is64Bit() ? Pthread64.class : Pthread32.class)); // reserve space for pthread_internal_t
         Pthread pthread = Pthread.create(emulator, thread);
 
         /* 0xa4必须固定，否则初始化objc会失败 */
-        final UnicornPointer tsd = pthread.getTSD(); // tsd size
+        final UnidbgPointer tsd = pthread.getTSD(); // tsd size
         assert tsd != null;
         tsd.setPointer(__TSD_THREAD_SELF * emulator.getPointerSize(), thread);
         tsd.setPointer(__TSD_ERRNO * emulator.getPointerSize(), errno);
         tsd.setPointer(__TSD_MIG_REPLY * emulator.getPointerSize(), null);
 
         if (emulator.is32Bit()) {
-            unicorn.reg_write(ArmConst.UC_ARM_REG_C13_C0_3, tsd.peer);
+            backend.reg_write(ArmConst.UC_ARM_REG_C13_C0_3, tsd.peer);
         } else {
-            unicorn.reg_write(Arm64Const.UC_ARM64_REG_TPIDRRO_EL0, tsd.peer);
+            backend.reg_write(Arm64Const.UC_ARM64_REG_TPIDRRO_EL0, tsd.peer);
         }
 
         long sp = getStackPoint();
@@ -221,7 +224,8 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         notifySingle(Dyld.dyld_image_state_dependents_initialized, module);
 
         if (callInitFunction || forceCallInit) {
-            for (MachOModule m : modules.values()) {
+            MachOModule[] modules = this.modules.values().toArray(new MachOModule[0]);
+            for (MachOModule m : modules) {
                 if (isPayloadModule(m)) {
                     continue;
                 }
@@ -327,6 +331,10 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         String dylibPath = libraryFile.getPath();
 
         for (MachO.LoadCommand command : machO.loadCommands()) {
+            if (command == null) {
+                throw new NullPointerException();
+            }
+
             switch (command.type()) {
                 case DYLD_INFO:
                 case DYLD_INFO_ONLY:
@@ -446,6 +454,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                 case ROUTINES:
                 case ROUTINES_64:
                 case LOAD_WEAK_DYLIB:
+                case BUILD_VERSION:
                     break;
                 case SUB_CLIENT:
                     MachO.SubCommand subCommand = (MachO.SubCommand) command.body();
@@ -524,7 +533,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                     if (machHeader == -1 && isTextSeg) {
                         machHeader = begin;
                     }
-                    Alignment alignment = this.mem_map(begin, segmentCommand.vmsize(), prot, dyId);
+                    Alignment alignment = this.mem_map(begin, segmentCommand.vmsize(), prot, dyId, emulator.getPageAlign());
                     write_mem((int) segmentCommand.fileoff(), (int) segmentCommand.filesize(), begin, buffer);
 
                     regions.add(new MemRegion(alignment.address, alignment.address + alignment.size, prot, libraryFile, segmentCommand.vmaddr()));
@@ -565,7 +574,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                     if (machHeader == -1 && isTextSeg) {
                         machHeader = begin;
                     }
-                    Alignment alignment = this.mem_map(begin, segmentCommand64.vmsize(), prot, dyId);
+                    Alignment alignment = this.mem_map(begin, segmentCommand64.vmsize(), prot, dyId, emulator.getPageAlign());
                     if (log.isDebugEnabled()) {
                         log.debug("mem_map address=0x" + Long.toHexString(alignment.address) + ", size=0x" + Long.toHexString(alignment.size));
                     }
@@ -852,7 +861,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                     address += Utils.readULEB128(buffer).longValue();
                     break;
                 case REBASE_OPCODE_ADD_ADDR_IMM_SCALED:
-                    address += (immediate * emulator.getPointerSize());
+                    address += ((long) immediate * emulator.getPointerSize());
                     break;
                 case REBASE_OPCODE_DO_REBASE_IMM_TIMES:
                     for (int i = 0; i < immediate; i++) {
@@ -898,14 +907,14 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
     }
 
     private void rebaseAt(Log log, int type, long address, Module module) {
-        Pointer pointer = UnicornPointer.pointer(emulator, address);
+        Pointer pointer = UnidbgPointer.pointer(emulator, address);
         if (pointer == null) {
             throw new IllegalStateException();
         }
         Pointer newPointer = pointer.getPointer(0);
         Pointer old = newPointer;
         if (newPointer == null) {
-            newPointer = UnicornPointer.pointer(emulator, module.base);
+            newPointer = UnidbgPointer.pointer(emulator, module.base);
         } else {
             newPointer = newPointer.share(module.base);
         }
@@ -947,11 +956,11 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
             buffer.limit(relocation.address + emulator.getPointerSize());
             buffer.position(relocation.address);
             long target = emulator.is64Bit() ? buffer.getLong() : buffer.getInt();
-            Pointer pointer = UnicornPointer.pointer(emulator, module.base + relocation.address);
+            Pointer pointer = UnidbgPointer.pointer(emulator, module.base + relocation.address);
             if (pointer == null) {
                 throw new IllegalStateException();
             }
-            pointer.setPointer(0, UnicornPointer.pointer(emulator, module.base + target));
+            pointer.setPointer(0, UnidbgPointer.pointer(emulator, module.base + target));
             if (log.isDebugEnabled()) {
                 log.debug("bindLocalRelocations address=0x" + Integer.toHexString(relocation.address) + ", symbolNum=0x" + Integer.toHexString(relocation.symbolNum) + ", target=0x" + Long.toHexString(target));
             }
@@ -982,7 +991,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
             }
 
             MachOSymbol symbol = module.getSymbolByIndex(relocation.symbolNum);
-            Pointer pointer = UnicornPointer.pointer(emulator, module.base + relocation.address);
+            Pointer pointer = UnidbgPointer.pointer(emulator, module.base + relocation.address);
             if (pointer == null) {
                 throw new IllegalStateException();
             }
@@ -994,7 +1003,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                 log.warn("bindExternalRelocations failed symbol=" + symbol + ", isWeakRef=" + isWeakRef);
                 ret = false;
             } else {
-                pointer.setPointer(0, UnicornPointer.pointer(emulator, address));
+                pointer.setPointer(0, UnidbgPointer.pointer(emulator, address));
                 if (log.isDebugEnabled()) {
                     log.debug("bindExternalRelocations address=0x" + Long.toHexString(relocation.address) + ", symbolNum=0x" + Integer.toHexString(relocation.symbolNum) + ", symbolName=" + symbol.getName());
                 }
@@ -1036,7 +1045,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                     if ("__DATA".equals(segmentCommand.segname())) {
                         for (MachO.SegmentCommand.Section section : segmentCommand.sections()) {
                             if ("__dyld".equals(section.sectName())) {
-                                Pointer dd = UnicornPointer.pointer(emulator, module.base + section.addr());
+                                Pointer dd = UnidbgPointer.pointer(emulator, module.base + section.addr());
                                 if (dyldLazyBinder == null) {
                                     dyldLazyBinder = emulator.getSvcMemory().registerSvc(new ArmSvc() {
                                         @Override
@@ -1049,8 +1058,8 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                                     dyldFuncLookup = emulator.getSvcMemory().registerSvc(new ArmSvc() {
                                         @Override
                                         public long handle(Emulator<?> emulator) {
-                                            String name = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0).getString(0);
-                                            Pointer address = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+                                            String name = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_R0).getString(0);
+                                            Pointer address = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
                                             return ((Dyld) emulator.getDlfcn())._dyld_func_lookup(emulator, name, address);
                                         }
                                     });
@@ -1068,7 +1077,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                     if ("__DATA".equals(segmentCommand64.segname())) {
                         for (MachO.SegmentCommand64.Section64 section : segmentCommand64.sections()) {
                             if ("__dyld".equals(section.sectName())) {
-                                Pointer dd = UnicornPointer.pointer(emulator, module.base + section.addr());
+                                Pointer dd = UnidbgPointer.pointer(emulator, module.base + section.addr());
                                 if (dyldLazyBinder == null) {
                                     dyldLazyBinder = emulator.getSvcMemory().registerSvc(new Arm64Svc() {
                                         @Override
@@ -1081,8 +1090,8 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                                     dyldFuncLookup = emulator.getSvcMemory().registerSvc(new Arm64Svc() {
                                         @Override
                                         public long handle(Emulator<?> emulator) {
-                                            String name = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X0).getString(0);
-                                            Pointer address = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X1);
+                                            String name = UnidbgPointer.register(emulator, Arm64Const.UC_ARM64_REG_X0).getString(0);
+                                            Pointer address = UnidbgPointer.register(emulator, Arm64Const.UC_ARM64_REG_X1);
                                             return ((Dyld) emulator.getDlfcn())._dyld_func_lookup(emulator, name, address);
                                         }
                                     });
@@ -1141,13 +1150,13 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                                     continue; // do nothing since already has absolute address
                                 }
                                 if (symbolIndex == INDIRECT_SYMBOL_LOCAL) {
-                                    UnicornPointer pointer = UnicornPointer.pointer(emulator, ptrToBind + module.base);
+                                    UnidbgPointer pointer = UnidbgPointer.pointer(emulator, ptrToBind + module.base);
                                     if (pointer == null) {
                                         throw new IllegalStateException("pointer is null");
                                     }
                                     Pointer newPointer = pointer.getPointer(0);
                                     if (newPointer == null) {
-                                        newPointer = UnicornPointer.pointer(emulator, module.base);
+                                        newPointer = UnidbgPointer.pointer(emulator, module.base);
                                     } else {
                                         newPointer = newPointer.share(module.base);
                                     }
@@ -1168,7 +1177,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                                 boolean isWeakRef = (symbol.nlist.desc() & N_WEAK_REF) != 0;
                                 long address = resolveSymbol(module, symbol);
 
-                                UnicornPointer pointer = UnicornPointer.pointer(emulator, ptrToBind + module.base);
+                                UnidbgPointer pointer = UnidbgPointer.pointer(emulator, ptrToBind + module.base);
                                 if (pointer == null) {
                                     throw new IllegalStateException("pointer is null");
                                 }
@@ -1180,7 +1189,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                                         log.warn("bindIndirectSymbolPointers failed symbol=" + symbol);
                                     }
                                 } else {
-                                    pointer.setPointer(0, UnicornPointer.pointer(emulator, address));
+                                    pointer.setPointer(0, UnidbgPointer.pointer(emulator, address));
                                     if (log.isDebugEnabled()) {
                                         log.debug("bindIndirectSymbolPointers symbolIndex=0x" + Long.toHexString(symbolIndex) + ", symbol=" + symbol + ", ptrToBind=0x" + Long.toHexString(ptrToBind));
                                     }
@@ -1286,7 +1295,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                         throw new IllegalStateException();
                     }
                     ret &= doBindAt(log, libraryOrdinal, type, address, symbolName, symbolFlags, addend, module);
-                    address += (immediate*emulator.getPointerSize() + emulator.getPointerSize());
+                    address += ((long) immediate *emulator.getPointerSize() + emulator.getPointerSize());
                     break;
                 case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
                     count = Utils.readULEB128(buffer).intValue();
@@ -1307,7 +1316,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
     }
 
     private boolean doBindAt(Log log, int libraryOrdinal, int type, long address, String symbolName, int symbolFlags, long addend, MachOModule module) {
-        Pointer pointer = UnicornPointer.pointer(emulator, address);
+        Pointer pointer = UnidbgPointer.pointer(emulator, address);
         if (pointer == null) {
             throw new IllegalStateException();
         }
@@ -1352,7 +1361,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                 }
             }
             if (bindAt > 0) {
-                Pointer newPointer = UnicornPointer.pointer(emulator, bindAt);
+                Pointer newPointer = UnidbgPointer.pointer(emulator, bindAt);
                 switch (type) {
                     case BIND_TYPE_POINTER:
                         pointer.setPointer(0, newPointer);
@@ -1380,9 +1389,9 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
             log.trace("doBindAt 0x=" + Long.toHexString(symbol.getValue()) + ", type=" + type + ", symbolName=" + symbol.getModuleName() + ", symbolFlags=" + symbolFlags + ", addend=" + addend + ", address=0x" + Long.toHexString(address - module.base) + ", lazy=" + false + ", symbol=" + symbol + ", pointer=" + pointer + ", bindAt=0x" + Long.toHexString(bindAt) + ", libraryOrdinal=" + libraryOrdinal);
         }
 
-        Pointer newPointer = UnicornPointer.pointer(emulator, bindAt);
+        Pointer newPointer = UnidbgPointer.pointer(emulator, bindAt);
         if (newPointer == null) {
-            newPointer = UnicornPointer.pointer(emulator, addend);
+            newPointer = UnidbgPointer.pointer(emulator, addend);
         } else {
             newPointer = newPointer.share(addend);
         }
@@ -1409,7 +1418,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
             buffer.position(offset);
             byte[] data = new byte[size];
             buffer.get(data);
-            unicorn.mem_write(begin, data);
+            pointer(begin).write(data);
         } else if(size < 0) {
             log.warn("write_mem offset=" + offset + ", size=" + offset + ", begin=0x" + Long.toHexString(begin));
         }
@@ -1589,26 +1598,26 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         throw new UnsupportedOperationException();
     }
 
-    final List<UnicornPointer> addImageCallbacks = new ArrayList<>();
-    final List<UnicornPointer> boundHandlers = new ArrayList<>();
-    final List<UnicornPointer> initializedHandlers = new ArrayList<>();
+    final List<UnidbgPointer> addImageCallbacks = new ArrayList<>();
+    final List<UnidbgPointer> boundHandlers = new ArrayList<>();
+    final List<UnidbgPointer> initializedHandlers = new ArrayList<>();
 
-    private UnicornStructure createDyldImageInfo(MachOModule module) {
+    private UnidbgStructure createDyldImageInfo(MachOModule module) {
         if (emulator.is64Bit()) {
-            int elementSize = UnicornStructure.calculateSize(DyldImageInfo64.class);
+            int elementSize = UnidbgStructure.calculateSize(DyldImageInfo64.class);
             Pointer pointer = emulator.getSvcMemory().allocate(elementSize, "notifySingle");
             DyldImageInfo64 info = new DyldImageInfo64(pointer);
             info.imageFilePath = module.createPathMemory(emulator.getSvcMemory());
-            info.imageLoadAddress = UnicornPointer.pointer(emulator, module.machHeader);
+            info.imageLoadAddress = UnidbgPointer.pointer(emulator, module.machHeader);
             info.imageFileModDate = 0;
             info.pack();
             return info;
         } else {
-            int elementSize = UnicornStructure.calculateSize(DyldImageInfo32.class);
+            int elementSize = UnidbgStructure.calculateSize(DyldImageInfo32.class);
             Pointer pointer = emulator.getSvcMemory().allocate(elementSize, "notifySingle");
             DyldImageInfo32 info = new DyldImageInfo32(pointer);
             info.imageFilePath = module.createPathMemory(emulator.getSvcMemory());
-            info.imageLoadAddress = UnicornPointer.pointer(emulator, module.machHeader);
+            info.imageLoadAddress = UnidbgPointer.pointer(emulator, module.machHeader);
             info.imageFileModDate = 0;
             info.pack();
             return info;
@@ -1620,21 +1629,21 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
             return;
         }
 
-        UnicornStructure info = createDyldImageInfo(module);
+        UnidbgStructure info = createDyldImageInfo(module);
         switch (state) {
             case Dyld.dyld_image_state_bound:
                 long slide = Dyld.computeSlide(emulator, module.machHeader);
                 if (!module.executable) {
-                    for (UnicornPointer callback : addImageCallbacks) {
+                    for (UnidbgPointer callback : addImageCallbacks) {
                         if (module.addImageCallSet.add(callback)) {
                             if (log.isDebugEnabled()) {
                                 log.debug("notifySingle callback=" + callback + ", module=" + module.name);
                             }
-                            Module.emulateFunction(emulator, callback.peer, UnicornPointer.pointer(emulator, module.machHeader), UnicornPointer.pointer(emulator, slide));
+                            Module.emulateFunction(emulator, callback.peer, UnidbgPointer.pointer(emulator, module.machHeader), UnidbgPointer.pointer(emulator, slide));
                         }
                     }
                 }
-                for (UnicornPointer handler : boundHandlers) {
+                for (UnidbgPointer handler : boundHandlers) {
                     if (module.boundCallSet.add(handler)) {
                         if (log.isDebugEnabled()) {
                             log.debug("notifySingle state=" + state + ", handler=" + handler + ", module=" + module.name);
@@ -1644,7 +1653,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                 }
                 break;
             case Dyld.dyld_image_state_dependents_initialized:
-                for (UnicornPointer handler : initializedHandlers) {
+                for (UnidbgPointer handler : initializedHandlers) {
                     if (module.dependentsInitializedCallSet.add(handler)) {
                         if (log.isDebugEnabled()) {
                             log.debug("notifySingle state=" + state + ", handler=" + handler + ", module=" + module.name);
@@ -1654,7 +1663,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                 }
                 break;
             case Dyld.dyld_image_state_initialized:
-                for (UnicornPointer handler : boundHandlers) {
+                for (UnidbgPointer handler : boundHandlers) {
                     if (module.initializedCallSet.add(handler)) {
                         if (log.isDebugEnabled()) {
                             log.debug("notifySingle state=" + state + ", handler=" + handler + ", module=" + module.name);
@@ -1672,7 +1681,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         if (executableModule == null) {
             executableModule = module;
 
-            vars.setPointer(0, UnicornPointer.pointer(emulator, module.machHeader)); // _NSGetMachExecuteHeader
+            vars.setPointer(0, UnidbgPointer.pointer(emulator, module.machHeader)); // _NSGetMachExecuteHeader
         }
     }
 
@@ -1685,7 +1694,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
 
         long address = allocateMapAddress(mask, size);
         int prot = UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE;
-        unicorn.mem_map(address, size,prot );
+        backend.mem_map(address, size,prot );
         if (memoryMap.put(address, new MemoryMap(address, size, prot)) != null) {
             log.warn("Replace memory map address=0x" + Long.toHexString(address));
         }
@@ -1709,8 +1718,8 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         }
         int prot = memoryMap == null ? args.inheritance : memoryMap.prot;
         try {
-            unicorn.mem_map(args.target_address, args.size, prot);
-        } catch (UnicornException e) {
+            backend.mem_map(args.target_address, args.size, prot);
+        } catch (BackendException e) {
             throw new IllegalStateException("remap target_address=0x" + Long.toHexString(args.target_address) + ", size=" + args.size, e);
         }
         if (this.memoryMap.put(args.target_address, new MemoryMap(args.target_address, args.size, prot)) != null) {
@@ -1737,7 +1746,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
 
             if (mapped != null) {
                 munmap(start, aligned);
-                unicorn.mem_map(start, aligned, prot);
+                backend.mem_map(start, aligned, prot);
                 if (memoryMap.put(start, new MemoryMap(start, aligned, prot)) != null) {
                     log.warn("mmap2 replace exists memory map: start=" + Long.toHexString(start));
                 }
@@ -1752,7 +1761,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
             if (log.isDebugEnabled()) {
                 log.debug("mmap2 addr=0x" + Long.toHexString(addr) + ", mmapBaseAddress=0x" + Long.toHexString(mmapBaseAddress) + ", start=" + start + ", fd=" + fd + ", offset=" + offset + ", aligned=" + aligned);
             }
-            unicorn.mem_map(addr, aligned, prot);
+            backend.mem_map(addr, aligned, prot);
             if (memoryMap.put(addr, new MemoryMap(addr, aligned, prot)) != null) {
                 log.warn("mmap2 replace exists memory map: addr=" + Long.toHexString(addr));
             }
@@ -1765,7 +1774,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                 if (log.isDebugEnabled()) {
                     log.debug("mmap2 addr=0x" + Long.toHexString(addr) + ", mmapBaseAddress=0x" + Long.toHexString(mmapBaseAddress));
                 }
-                long ret = file.mmap2(unicorn, addr, aligned, prot, offset, length);
+                long ret = file.mmap2(emulator, addr, aligned, prot, offset, length);
                 if (memoryMap.put(addr, new MemoryMap(addr, aligned, prot)) != null) {
                     log.warn("mmap2 replace exists memory map addr=0x" + Long.toHexString(addr));
                 }
@@ -1785,13 +1794,13 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                 }
 
                 if (mapped != null) {
-                    unicorn.mem_unmap(start, aligned);
+                    backend.mem_unmap(start, aligned);
                 } else {
                     log.warn("mmap2 MAP_FIXED not found mapped memory: start=0x" + Long.toHexString(start));
                 }
                 FileIO io = syscallHandler.fdMap.get(fd);
                 if (io != null) {
-                    return io.mmap2(unicorn, start, aligned, prot, offset, length);
+                    return io.mmap2(emulator, start, aligned, prot, offset, length);
                 }
             }
             if (flags == MAP_MY_FIXED) {
@@ -1812,7 +1821,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                     }
                     return 0;
                 }
-                unicorn.mem_map(start, aligned, prot);
+                backend.mem_map(start, aligned, prot);
                 if (memoryMap.put(start, new MemoryMap(start, aligned, prot)) != null) {
                     log.warn("mmap2 NOT VM_FLAGS_ANYWHERE exists memory map addr=0x" + Long.toHexString(start));
                 }
@@ -1826,7 +1835,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
     }
 
     @Override
-    public Module loadVirtualModule(String name, Map<String, UnicornPointer> symbols) {
+    public Module loadVirtualModule(String name, Map<String, UnidbgPointer> symbols) {
         MachOModule module = MachOModule.createVirtualModule(name, symbols, emulator);
         modules.put(name, module);
         if (maxDylibName == null || name.length() > maxDylibName.length()) {

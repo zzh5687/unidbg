@@ -1,8 +1,8 @@
 package com.github.unidbg.arm;
 
+import com.github.unidbg.arm.backend.Backend;
 import unicorn.Arm64Const;
 import unicorn.ArmConst;
-import unicorn.Unicorn;
 
 public class Cpsr {
 
@@ -13,31 +13,41 @@ public class Cpsr {
     private void setBit(int offset) {
         int mask = 1 << offset;
         value |= mask;
-        unicorn.reg_write(regId, value);
+        backend.reg_write(regId, value);
     }
 
     private void clearBit(int offset) {
         int mask = ~(1 << offset);
         value &= mask;
-        unicorn.reg_write(regId, value);
+        backend.reg_write(regId, value);
     }
 
-    public static Cpsr getArm(Unicorn unicorn) {
-        return new Cpsr(unicorn, ArmConst.UC_ARM_REG_CPSR);
+    public static Cpsr getArm(Backend backend) {
+        return new Cpsr(backend, ArmConst.UC_ARM_REG_CPSR);
     }
 
-    public static Cpsr getArm64(Unicorn unicorn) {
-        return new Cpsr(unicorn, Arm64Const.UC_ARM64_REG_NZCV);
+    public static Cpsr getArm64(Backend backend) {
+        return new Cpsr(backend, Arm64Const.UC_ARM64_REG_NZCV);
     }
 
-    private final Unicorn unicorn;
+    private final Backend backend;
     private final int regId;
     private int value;
 
-    private Cpsr(Unicorn unicorn, int regId) {
-        this.unicorn = unicorn;
+    private Cpsr(Backend backend, int regId) {
+        this.backend = backend;
         this.regId = regId;
-        this.value = ((Number) unicorn.reg_read(regId)).intValue();
+        this.value = backend.reg_read(regId).intValue();
+    }
+
+    public int getValue() {
+        return value;
+    }
+
+    private static final int A32_BIT = 4;
+
+    boolean isA32() {
+        return hasBit(value, A32_BIT);
     }
 
     private static final int THUMB_BIT = 5;
@@ -111,10 +121,14 @@ public class Cpsr {
         return value & MODE_MASK;
     }
 
-    void switchUserMode() {
+    int getEL() {
+        return (value >> 2) & 3;
+    }
+
+    public final void switchUserMode() {
         value &= ~MODE_MASK;
         value |= ARMEmulator.USR_MODE;
-        unicorn.reg_write(regId, value);
+        backend.reg_write(regId, value);
     }
 
 }

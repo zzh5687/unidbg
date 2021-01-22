@@ -5,6 +5,7 @@ import com.github.unidbg.LibraryResolver;
 import com.github.unidbg.Module;
 import com.github.unidbg.Symbol;
 import com.github.unidbg.arm.HookStatus;
+import com.github.unidbg.arm.backend.dynarmic.DynarmicLoader;
 import com.github.unidbg.arm.context.RegisterContext;
 import com.github.unidbg.debugger.ida.Utils;
 import com.github.unidbg.file.FileResult;
@@ -20,7 +21,7 @@ import com.github.unidbg.linux.file.DirectoryFileIO;
 import com.github.unidbg.linux.file.MapsFileIO;
 import com.github.unidbg.linux.file.SimpleFileIO;
 import com.github.unidbg.memory.Memory;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.github.unidbg.utils.Inspector;
 import com.sun.jna.Pointer;
 import org.apache.commons.codec.binary.Hex;
@@ -33,6 +34,10 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 public class AndroidServerTest implements IOResolver<AndroidFileIO>, PTrace {
+
+    static {
+        DynarmicLoader.useDynarmic();
+    }
 
     public static void main(String[] args) throws IOException {
         new AndroidServerTest().test();
@@ -72,7 +77,7 @@ public class AndroidServerTest implements IOResolver<AndroidFileIO>, PTrace {
     private final File executable;
 
     private AndroidServerTest() throws IOException {
-        executable = new File("src/test/resources/example_binaries/ida/android_server_7.4");
+        executable = new File("unidbg-android/src/test/resources/example_binaries/ida/android_server_7.4");
         emulator = new MyAndroidARMEmulator(executable);
         emulator.getSyscallHandler().addIOResolver(this);
         Memory memory = emulator.getMemory();
@@ -135,8 +140,8 @@ public class AndroidServerTest implements IOResolver<AndroidFileIO>, PTrace {
             public void postCall(Emulator<?> emulator, HookZzArm32RegisterContext ctx, HookEntryInfo info) {
                 super.postCall(emulator, ctx, info);
                 long value = ctx.pop();
-                UnicornPointer data = ctx.pop();
-                UnicornPointer end = ctx.getPointerArg(0);
+                UnidbgPointer data = ctx.pop();
+                UnidbgPointer end = ctx.getPointerArg(0);
                 int size = (int) (end.toUIntPeer() - data.toUIntPeer());
                 byte[] my = Utils.pack_dd(value);
                 byte[] ida = data.getByteArray(0, size);
@@ -160,8 +165,8 @@ public class AndroidServerTest implements IOResolver<AndroidFileIO>, PTrace {
             public void postCall(Emulator<?> emulator, HookZzArm32RegisterContext ctx, HookEntryInfo info) {
                 super.postCall(emulator, ctx, info);
                 long value = ctx.pop();
-                UnicornPointer data = ctx.pop();
-                UnicornPointer end = ctx.getPointerArg(0);
+                UnidbgPointer data = ctx.pop();
+                UnidbgPointer end = ctx.getPointerArg(0);
                 int size = (int) (end.toUIntPeer() - data.toUIntPeer());
                 byte[] my = Utils.pack_dq(value);
                 byte[] ida = data.getByteArray(0, size);
@@ -184,8 +189,8 @@ public class AndroidServerTest implements IOResolver<AndroidFileIO>, PTrace {
             @Override
             public void postCall(Emulator<?> emulator, HookZzArm32RegisterContext ctx, HookEntryInfo info) {
                 super.postCall(emulator, ctx, info);
-                UnicornPointer end = ctx.pop();
-                UnicornPointer data = ctx.pop();
+                UnidbgPointer end = ctx.pop();
+                UnidbgPointer data = ctx.pop();
                 long value = ctx.getR0Int() & 0xffffffffL;
                 int size = (int) (end.toUIntPeer() - data.toUIntPeer());
                 byte[] bytes = data.getByteArray(0, size);
@@ -208,8 +213,8 @@ public class AndroidServerTest implements IOResolver<AndroidFileIO>, PTrace {
             @Override
             public void postCall(Emulator<?> emulator, HookZzArm32RegisterContext ctx, HookEntryInfo info) {
                 super.postCall(emulator, ctx, info);
-                UnicornPointer end = ctx.pop();
-                UnicornPointer data = ctx.pop();
+                UnidbgPointer end = ctx.pop();
+                UnidbgPointer data = ctx.pop();
                 long low = ctx.getR0Int();
                 long high = ctx.getR1Int();
                 long value = (high << 32) | low;

@@ -2,7 +2,7 @@ package com.github.unidbg.hook.hookzz;
 
 import com.github.unidbg.Emulator;
 import com.github.unidbg.arm.context.RegisterContext;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.sun.jna.Pointer;
 import unicorn.ArmConst;
 
@@ -15,12 +15,12 @@ public class HookZzArm32RegisterContextImpl extends HookZzRegisterContext implem
 
     HookZzArm32RegisterContextImpl(Emulator<?> emulator, Stack<Object> context) {
         super(context);
-        this.reg_ctx = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0).share(8); // skip dummy
+        this.reg_ctx = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_R0).share(8); // skip dummy
         this.emulator = emulator;
     }
 
     @Override
-    public UnicornPointer getPointerArg(int index) {
+    public UnidbgPointer getPointerArg(int index) {
         if (index < 4) {
             switch (index) {
                 case 0:
@@ -36,8 +36,53 @@ public class HookZzArm32RegisterContextImpl extends HookZzRegisterContext implem
             }
         }
 
-        UnicornPointer sp = getStackPointer();
-        return sp.getPointer((index - 4) * emulator.getPointerSize());
+        UnidbgPointer sp = getStackPointer();
+        return sp.getPointer((long) (index - 4) * emulator.getPointerSize());
+    }
+
+    @Override
+    public void setR0(int r0) {
+        reg_ctx.setInt(0, r0);
+    }
+
+    @Override
+    public void setR1(int r1) {
+        reg_ctx.setInt(4, r1);
+    }
+
+    @Override
+    public void setR2(int r2) {
+        reg_ctx.setInt(8, r2);
+    }
+
+    @Override
+    public void setR3(int r3) {
+        reg_ctx.setInt(12, r3);
+    }
+
+    @Override
+    public void setR4(int r4) {
+        reg_ctx.setInt(16, r4);
+    }
+
+    @Override
+    public void setR5(int r5) {
+        reg_ctx.setInt(20, r5);
+    }
+
+    @Override
+    public void setR6(int r6) {
+        reg_ctx.setInt(24, r6);
+    }
+
+    @Override
+    public void setR7(int r7) {
+        reg_ctx.setInt(28, r7);
+    }
+
+    @Override
+    public void setStackPointer(Pointer sp) {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -176,77 +221,77 @@ public class HookZzArm32RegisterContextImpl extends HookZzRegisterContext implem
     }
 
     @Override
-    public UnicornPointer getStackPointer() {
-        return (UnicornPointer) reg_ctx.share(56);
+    public UnidbgPointer getStackPointer() {
+        return (UnidbgPointer) reg_ctx.share(56);
     }
 
     @Override
-    public UnicornPointer getR0Pointer() {
-        return UnicornPointer.pointer(emulator, getR0Long());
+    public UnidbgPointer getR0Pointer() {
+        return UnidbgPointer.pointer(emulator, getR0Long());
     }
 
     @Override
-    public UnicornPointer getR1Pointer() {
-        return UnicornPointer.pointer(emulator, getR1Long());
+    public UnidbgPointer getR1Pointer() {
+        return UnidbgPointer.pointer(emulator, getR1Long());
     }
 
     @Override
-    public UnicornPointer getR2Pointer() {
-        return UnicornPointer.pointer(emulator, getR2Long());
+    public UnidbgPointer getR2Pointer() {
+        return UnidbgPointer.pointer(emulator, getR2Long());
     }
 
     @Override
-    public UnicornPointer getR3Pointer() {
-        return UnicornPointer.pointer(emulator, getR3Long());
+    public UnidbgPointer getR3Pointer() {
+        return UnidbgPointer.pointer(emulator, getR3Long());
     }
 
     @Override
-    public UnicornPointer getR4Pointer() {
-        return UnicornPointer.pointer(emulator, getR4Long());
+    public UnidbgPointer getR4Pointer() {
+        return UnidbgPointer.pointer(emulator, getR4Long());
     }
 
     @Override
-    public UnicornPointer getR5Pointer() {
-        return UnicornPointer.pointer(emulator, getR5Long());
+    public UnidbgPointer getR5Pointer() {
+        return UnidbgPointer.pointer(emulator, getR5Long());
     }
 
     @Override
-    public UnicornPointer getR6Pointer() {
-        return UnicornPointer.pointer(emulator, getR6Long());
+    public UnidbgPointer getR6Pointer() {
+        return UnidbgPointer.pointer(emulator, getR6Long());
     }
 
     @Override
-    public UnicornPointer getR7Pointer() {
-        return UnicornPointer.pointer(emulator, getR7Long());
+    public UnidbgPointer getR7Pointer() {
+        return UnidbgPointer.pointer(emulator, getR7Long());
     }
 
     @Override
-    public UnicornPointer getR8Pointer() {
-        return UnicornPointer.pointer(emulator, getR8Long());
+    public UnidbgPointer getR8Pointer() {
+        return UnidbgPointer.pointer(emulator, getR8Long());
     }
 
     @Override
-    public UnicornPointer getR9Pointer() {
-        return UnicornPointer.pointer(emulator, getR9Long());
+    public UnidbgPointer getR9Pointer() {
+        return UnidbgPointer.pointer(emulator, getR9Long());
     }
 
     @Override
-    public UnicornPointer getR10Pointer() {
-        return UnicornPointer.pointer(emulator, getR10Long());
+    public UnidbgPointer getR10Pointer() {
+        return UnidbgPointer.pointer(emulator, getR10Long());
     }
 
     @Override
-    public UnicornPointer getR11Pointer() {
-        return UnicornPointer.pointer(emulator, getR11Long());
+    public UnidbgPointer getR11Pointer() {
+        return UnidbgPointer.pointer(emulator, getR11Long());
     }
 
     @Override
-    public UnicornPointer getR12Pointer() {
-        return UnicornPointer.pointer(emulator, getR12Long());
+    public UnidbgPointer getR12Pointer() {
+        return UnidbgPointer.pointer(emulator, getR12Long());
     }
 
     @Override
-    public UnicornPointer getLRPointer() {
-        return UnicornPointer.pointer(emulator, getLR());
+    public UnidbgPointer getLRPointer() {
+        return UnidbgPointer.pointer(emulator, getLR());
     }
 }

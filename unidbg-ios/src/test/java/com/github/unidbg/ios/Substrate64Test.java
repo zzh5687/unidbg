@@ -1,13 +1,19 @@
 package com.github.unidbg.ios;
 
-import com.github.unidbg.*;
+import com.github.unidbg.Emulator;
+import com.github.unidbg.LibraryResolver;
+import com.github.unidbg.Module;
+import com.github.unidbg.Symbol;
 import com.github.unidbg.arm.HookStatus;
 import com.github.unidbg.arm.context.RegisterContext;
 import com.github.unidbg.hook.HookLoader;
 import com.github.unidbg.hook.MsgSendCallback;
 import com.github.unidbg.hook.ReplaceCallback;
-import com.github.unidbg.hook.hookzz.*;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.hook.hookzz.Dobby;
+import com.github.unidbg.hook.hookzz.HookEntryInfo;
+import com.github.unidbg.hook.hookzz.IHookZz;
+import com.github.unidbg.hook.hookzz.InstrumentCallback;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.sun.jna.Pointer;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
@@ -132,7 +138,7 @@ public class Substrate64Test extends EmulatorTest<DarwinARM64Emulator> implement
         assertNotNull(symbol);
         start = System.currentTimeMillis();
         // emulator.traceCode();
-        numbers = symbol.call(emulator, UnicornPointer.pointer(emulator, ret), "_MSGetImageByName");
+        numbers = symbol.call(emulator, UnidbgPointer.pointer(emulator, ret), "_MSGetImageByName");
         ret = numbers[0].longValue();
         System.err.println("_MSFindSymbol ret=0x" + Long.toHexString(ret) + ", offset=" + (System.currentTimeMillis() - start) + "ms");
 

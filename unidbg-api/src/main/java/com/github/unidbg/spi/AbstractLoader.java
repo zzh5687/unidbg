@@ -3,12 +3,13 @@ package com.github.unidbg.spi;
 import com.github.unidbg.*;
 import com.github.unidbg.arm.ARM;
 import com.github.unidbg.arm.ARMEmulator;
+import com.github.unidbg.arm.backend.Backend;
 import com.github.unidbg.file.NewFileIO;
 import com.github.unidbg.hook.HookListener;
 import com.github.unidbg.memory.Memory;
 import com.github.unidbg.memory.MemoryBlock;
 import com.github.unidbg.memory.MemoryMap;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.github.unidbg.unix.UnixEmulator;
 import com.github.unidbg.unix.UnixSyscallHandler;
 import com.sun.jna.Pointer;
@@ -17,8 +18,8 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import unicorn.Arm64Const;
 import unicorn.ArmConst;
-import unicorn.Unicorn;
 
+import java.io.DataOutput;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -29,7 +30,7 @@ public abstract class AbstractLoader<T extends NewFileIO> implements Memory, Loa
 
     private static final Log log = LogFactory.getLog(AbstractLoader.class);
 
-    protected final Unicorn unicorn;
+    protected final Backend backend;
     protected final Emulator<T> emulator;
     protected final UnixSyscallHandler<T> syscallHandler;
 
@@ -46,7 +47,7 @@ public abstract class AbstractLoader<T extends NewFileIO> implements Memory, Loa
     }
 
     public AbstractLoader(Emulator<T> emulator, UnixSyscallHandler<T> syscallHandler) {
-        this.unicorn = emulator.getUnicorn();
+        this.backend = emulator.getBackend();
         this.emulator = emulator;
         this.syscallHandler = syscallHandler;
 
@@ -59,10 +60,10 @@ public abstract class AbstractLoader<T extends NewFileIO> implements Memory, Loa
     }
 
     @Override
-    public final UnicornPointer mmap(int length, int prot) {
+    public final UnidbgPointer mmap(int length, int prot) {
         int aligned = (int) ARM.alignSize(length, emulator.getPageAlign());
         long addr = mmap2(0, aligned, prot, 0, -1, 0);
-        UnicornPointer pointer = UnicornPointer.pointer(emulator, addr);
+        UnidbgPointer pointer = UnidbgPointer.pointer(emulator, addr);
         assert pointer != null;
         return pointer.setSize(aligned);
     }
@@ -108,7 +109,7 @@ public abstract class AbstractLoader<T extends NewFileIO> implements Memory, Loa
     @Override
     public final int munmap(long start, int length) {
         int aligned = (int) ARM.alignSize(length, emulator.getPageAlign());
-        unicorn.mem_unmap(start, aligned);
+        backend.mem_unmap(start, aligned);
         MemoryMap removed = memoryMap.remove(start);
 
         if (removed == null) {
@@ -181,7 +182,7 @@ public abstract class AbstractLoader<T extends NewFileIO> implements Memory, Loa
             return -1;
         }
 
-        unicorn.mem_protect(address, length, prot);
+        backend.mem_protect(address, length, prot);
         return 0;
     }
 
@@ -231,31 +232,31 @@ public abstract class AbstractLoader<T extends NewFileIO> implements Memory, Loa
     }
 
     @Override
-    public final UnicornPointer allocateStack(int size) {
+    public final UnidbgPointer allocateStack(int size) {
         setStackPoint(sp - size);
-        UnicornPointer pointer = UnicornPointer.pointer(emulator, sp);
+        UnidbgPointer pointer = UnidbgPointer.pointer(emulator, sp);
         assert pointer != null;
         return pointer.setSize(size);
     }
 
     @Override
-    public final UnicornPointer writeStackString(String str) {
+    public final UnidbgPointer writeStackString(String str) {
         byte[] data = str.getBytes(StandardCharsets.UTF_8);
         return writeStackBytes(Arrays.copyOf(data, data.length + 1));
     }
 
     @Override
-    public final UnicornPointer writeStackBytes(byte[] data) {
+    public final UnidbgPointer writeStackBytes(byte[] data) {
         int size = ARM.alignSize(data.length);
-        UnicornPointer pointer = allocateStack(size);
+        UnidbgPointer pointer = allocateStack(size);
         assert pointer != null;
         pointer.write(0, data, 0, data.length);
         return pointer;
     }
 
     @Override
-    public final UnicornPointer pointer(long address) {
-        return UnicornPointer.pointer(emulator, address);
+    public final UnidbgPointer pointer(long address) {
+        return UnidbgPointer.pointer(emulator, address);
     }
 
     private long stackBase;
@@ -278,9 +279,9 @@ public abstract class AbstractLoader<T extends NewFileIO> implements Memory, Loa
         }
         this.sp = sp;
         if (emulator.is32Bit()) {
-            unicorn.reg_write(ArmConst.UC_ARM_REG_SP, sp);
+            backend.reg_write(ArmConst.UC_ARM_REG_SP, sp);
         } else {
-            unicorn.reg_write(Arm64Const.UC_ARM64_REG_SP, sp);
+            backend.reg_write(Arm64Const.UC_ARM64_REG_SP, sp);
         }
     }
 
@@ -304,7 +305,7 @@ public abstract class AbstractLoader<T extends NewFileIO> implements Memory, Loa
 
     @Override
     public final File dumpStack() throws IOException {
-        UnicornPointer sp = UnicornPointer.register(emulator, emulator.is32Bit() ? ArmConst.UC_ARM_REG_SP : Arm64Const.UC_ARM64_REG_SP);
+        UnidbgPointer sp = UnidbgPointer.register(emulator, emulator.is32Bit() ? ArmConst.UC_ARM_REG_SP : Arm64Const.UC_ARM64_REG_SP);
         File outFile = File.createTempFile("stack_0x" + Long.toHexString(sp.peer) + "_", ".dat");
         dump(sp, STACK_BASE - sp.peer, outFile);
         return outFile;
@@ -335,14 +336,14 @@ public abstract class AbstractLoader<T extends NewFileIO> implements Memory, Loa
         return malloc(length, true);
     }
 
-    protected final Alignment mem_map(long address, long size, int prot, String libraryName) {
-        Alignment alignment = emulator.align(address, size);
+    protected final Alignment mem_map(long address, long size, int prot, String libraryName, long align) {
+        Alignment alignment = ARM.align(address, size, align);
 
         if (log.isDebugEnabled()) {
             log.debug("[" + libraryName + "]0x" + Long.toHexString(alignment.address) + " - 0x" + Long.toHexString(alignment.address + alignment.size) + ", size=0x" + Long.toHexString(alignment.size) + ", prot=" + prot);
         }
 
-        unicorn.mem_map(alignment.address, alignment.size, prot);
+        backend.mem_map(alignment.address, alignment.size, prot);
         if (memoryMap.put(alignment.address, new MemoryMap(alignment.address, (int) alignment.size, prot)) != null) {
             log.warn("mem_map replace exists memory map address=" + Long.toHexString(alignment.address));
         }
@@ -375,7 +376,26 @@ public abstract class AbstractLoader<T extends NewFileIO> implements Memory, Loa
     }
 
     @Override
-    public Module loadVirtualModule(String name, Map<String, UnicornPointer> symbols) {
+    public Module loadVirtualModule(String name, Map<String, UnidbgPointer> symbols) {
         throw new UnsupportedOperationException();
     }
+
+    @Override
+    public void serialize(DataOutput out) throws IOException {
+        out.writeLong(sp);
+        out.writeLong(mmapBaseAddress);
+        out.writeLong(stackBase);
+        out.writeLong(stackSize);
+        out.writeInt(memoryMap.size());
+        for (Map.Entry<Long, MemoryMap> entry : memoryMap.entrySet()) {
+            MemoryMap map = entry.getValue();
+            out.writeLong(entry.getKey());
+            map.serialize(out);
+            UnidbgPointer pointer = UnidbgPointer.pointer(emulator, map.base);
+            assert pointer != null;
+            byte[] data = pointer.getByteArray(0, (int) map.size);
+            out.write(data);
+        }
+    }
+
 }

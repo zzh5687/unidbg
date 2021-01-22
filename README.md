@@ -43,6 +43,7 @@ Simple tests under src/test directory
 
 ## Thanks
 - [unicorn](https://github.com/zhkl0228/unicorn)
+- [dynarmic](https://github.com/MerryMage/dynarmic)
 - [HookZz](https://github.com/jmpews/Dobby)
 - [xHook](https://github.com/iqiyi/xHook)
 - [AndroidNativeEmu](https://github.com/AeonLucid/AndroidNativeEmu)
@@ -55,4 +56,3 @@ Simple tests under src/test directory
 - [kaitai_struct](https://github.com/kaitai-io/kaitai_struct)
 - [fishhook](https://github.com/facebook/fishhook)
 - [runtime_class-dump](https://github.com/Tyilo/runtime_class-dump)
-- [GccDemangler](https://github.com/FearlessTobi/GccDemangler)

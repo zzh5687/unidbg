@@ -2,13 +2,18 @@ package com.github.unidbg.android;
 
 import com.github.unidbg.*;
 import com.github.unidbg.arm.HookStatus;
+import com.github.unidbg.arm.backend.dynarmic.DynarmicLoader;
 import com.github.unidbg.hook.ReplaceCallback;
 import com.github.unidbg.hook.xhook.IxHook;
 import com.github.unidbg.linux.android.AndroidARMEmulator;
 import com.github.unidbg.linux.android.AndroidResolver;
 import com.github.unidbg.linux.android.XHookImpl;
-import com.github.unidbg.linux.android.dvm.*;
+import com.github.unidbg.linux.android.dvm.DalvikModule;
+import com.github.unidbg.linux.android.dvm.DvmClass;
+import com.github.unidbg.linux.android.dvm.StringObject;
+import com.github.unidbg.linux.android.dvm.VM;
 import com.github.unidbg.linux.android.dvm.array.ByteArray;
+import com.github.unidbg.linux.android.dvm.jni.ProxyClassFactory;
 import com.github.unidbg.memory.Memory;
 import com.github.unidbg.utils.Inspector;
 
@@ -20,7 +25,11 @@ import javax.crypto.spec.IvParameterSpec;
 import java.io.File;
 import java.io.IOException;
 
-public class QDReaderJni extends AbstractJni implements ModuleListener {
+public class QDReaderJni implements ModuleListener {
+
+    static {
+        DynarmicLoader.useDynarmic();
+    }
 
     private static final int SDK = 23;
 
@@ -44,7 +53,8 @@ public class QDReaderJni extends AbstractJni implements ModuleListener {
         memory.addModuleListener(this);
 
         vm = emulator.createDalvikVM(null);
-        vm.setJni(this);
+        vm.setDvmClassFactory(new ProxyClassFactory());
+        vm.setVerbose(true);
         DalvikModule dm = vm.loadLibrary(new File("unidbg-android/src/test/resources/example_binaries/armeabi-v7a/libd-lib.so"), false);
         dm.callJNI_OnLoad(emulator);
 

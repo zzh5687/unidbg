@@ -2,6 +2,7 @@ package com.github.unidbg.linux.android.dvm;
 
 import com.github.unidbg.Emulator;
 import com.github.unidbg.Module;
+import com.github.unidbg.linux.android.dvm.apk.AssetResolver;
 import com.sun.jna.Pointer;
 
 import java.io.File;
@@ -25,12 +26,18 @@ public interface VM {
 
     Pointer getJNIEnv();
 
+    /**
+     * @param interfaceClasses 如果不为空的话，第一个为superClass，其它的为interfaces
+     */
     DvmClass resolveClass(String className, DvmClass... interfaceClasses);
 
     DvmClass findClass(String className);
 
     <T extends DvmObject<?>> T getObject(int hash);
 
+    /**
+     * Use vm.setDvmClassFactory(new ProxyClassFactory()) instead
+     */
     void setJni(Jni jni);
 
     void printMemoryInfo();
@@ -55,6 +62,8 @@ public interface VM {
      */
     byte[] openAsset(String fileName);
 
+    void setAssetResolver(AssetResolver assetResolver);
+
     /**
      * 设置apkFile以后，可调用该方法获取AndroidManifest.xml
      * @return 可返回null
@@ -75,4 +84,6 @@ public interface VM {
     void setVerbose(boolean verbose);
 
     void setDvmClassFactory(DvmClassFactory factory);
+
+    Emulator<?> getEmulator();
 }

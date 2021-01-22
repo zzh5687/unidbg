@@ -1,23 +1,21 @@
 package net.fornwall.jelf;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 /** Package internal class used for parsing ELF files. */
-class ElfParser {
+class ElfParser implements ElfDataIn {
 
 	final ElfFile elfFile;
-	private final ByteArrayInputStream fsFile;
+	private final ByteBuffer fsFile;
 
-	ElfParser(ElfFile elfFile, ByteArrayInputStream fsFile) {
+	ElfParser(ElfFile elfFile, ByteBuffer fsFile) {
 		this.elfFile = elfFile;
 		this.fsFile = fsFile;
 	}
 
 	void seek(long offset) {
-		fsFile.reset();
-		if (fsFile.skip(offset) != offset)
-			throw new ElfException("seeking outside file");
+		fsFile.position((int) offset);
 	}
 
 	/**
@@ -32,48 +30,55 @@ class ElfParser {
 	}
 
 	long byteSwap(long arg) {
-		return ((((long) byteSwap((int) arg)) << 32) | (((long) byteSwap((int) (arg >>> 32))) & 0xFFFFFFFF));
+		return ((((long) byteSwap((int) arg)) << 32) | (((long) byteSwap((int) (arg >>> 32)))));
 	}
 
-	short readUnsignedByte() {
-		int val = fsFile.read();
-		if (val < 0) throw new ElfException("Trying to read outside file");
+	@Override
+	public short readUnsignedByte() {
+		int val = fsFile.get() & 0xff;
 		return (short) val;
 	}
 
-	short readShort() throws ElfException {
+	@Override
+	public short readShort() throws ElfException {
 		int ch1 = readUnsignedByte();
 		int ch2 = readUnsignedByte();
-		short val = (short) ((ch1 << 8) + (ch2 << 0));
+		short val = (short) ((ch1 << 8) + (ch2));
 		if (elfFile.encoding == ElfFile.DATA_LSB) val = byteSwap(val);
 		return val;
 	}
 
-	int readInt() throws ElfException {
+	@Override
+	public int readInt() throws ElfException {
 		int ch1 = readUnsignedByte();
 		int ch2 = readUnsignedByte();
 		int ch3 = readUnsignedByte();
 		int ch4 = readUnsignedByte();
-		int val = ((ch1 << 24) + (ch2 << 16) + (ch3 << 8) + (ch4 << 0));
+		int val = ((ch1 << 24) + (ch2 << 16) + (ch3 << 8) + (ch4));
 
-		if (elfFile.encoding == ElfFile.DATA_LSB) val = byteSwap(val);
+		if (elfFile.encoding == ElfFile.DATA_LSB) {
+			val = byteSwap(val);
+		}
 		return val;
 	}
 
-	long readLong() {
+	@Override
+	public long readLong() {
 		int ch1 = readUnsignedByte();
 		int ch2 = readUnsignedByte();
 		int ch3 = readUnsignedByte();
 		int ch4 = readUnsignedByte();
-		int val1 = ((ch1 << 24) + (ch2 << 16) + (ch3 << 8) + (ch4 << 0));
+		int val1 = ((ch1 << 24) + (ch2 << 16) + (ch3 << 8) + (ch4));
 		int ch5 = readUnsignedByte();
 		int ch6 = readUnsignedByte();
 		int ch7 = readUnsignedByte();
 		int ch8 = readUnsignedByte();
-		int val2 = ((ch5 << 24) + (ch6 << 16) + (ch7 << 8) + (ch8 << 0));
+		int val2 = ((ch5 << 24) + (ch6 << 16) + (ch7 << 8) + (ch8));
 
 		long val = ((long) (val1) << 32) + (val2 & 0xFFFFFFFFL);
-		if (elfFile.encoding == ElfFile.DATA_LSB) val = byteSwap(val);
+		if (elfFile.encoding == ElfFile.DATA_LSB) {
+			val = byteSwap(val);
+		}
 		return val;
 	}
 
@@ -83,6 +88,7 @@ class ElfParser {
 	}
 
 	/** Returns a big-endian unsigned representation of the int. */
+	@SuppressWarnings("unused")
 	long unsignedByte(int arg) {
 		long val;
 		if (arg >= 0) {
@@ -111,8 +117,19 @@ class ElfParser {
 		throw new ElfException("Cannot find segment for address " + Long.toHexString(address));
 	}
 
-	public int read(byte[] data) throws IOException {
-		return fsFile.read(data);
+	int read(byte[] data) {
+		fsFile.get(data);
+		return data.length;
+	}
+
+	ByteBuffer readBuffer(int length) {
+		int limit = fsFile.limit();
+		try {
+			fsFile.limit(fsFile.position() + length);
+			return fsFile.slice();
+		} finally {
+			fsFile.limit(limit);
+		}
 	}
 
 }

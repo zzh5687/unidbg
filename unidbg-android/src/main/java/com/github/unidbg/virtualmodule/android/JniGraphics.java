@@ -4,14 +4,12 @@ import com.github.unidbg.Emulator;
 import com.github.unidbg.arm.Arm64Svc;
 import com.github.unidbg.arm.ArmSvc;
 import com.github.unidbg.arm.context.RegisterContext;
-import com.github.unidbg.utils.Inspector;
-import com.github.unidbg.virtualmodule.VirtualModule;
 import com.github.unidbg.linux.android.dvm.VM;
 import com.github.unidbg.linux.android.dvm.api.Bitmap;
-import com.github.unidbg.memory.Memory;
-import com.github.unidbg.memory.MemoryBlock;
 import com.github.unidbg.memory.SvcMemory;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
+import com.github.unidbg.utils.Inspector;
+import com.github.unidbg.virtualmodule.VirtualModule;
 import com.sun.jna.Pointer;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -30,7 +28,7 @@ public class JniGraphics extends VirtualModule<VM> {
     }
 
     @Override
-    protected void onInitialize(Emulator<?> emulator, final VM vm, Map<String, UnicornPointer> symbols) {
+    protected void onInitialize(Emulator<?> emulator, final VM vm, Map<String, UnidbgPointer> symbols) {
         boolean is64Bit = emulator.is64Bit();
         SvcMemory svcMemory = emulator.getSvcMemory();
         symbols.put("AndroidBitmap_getInfo", svcMemory.registerSvc(is64Bit ? new Arm64Svc() {
@@ -74,7 +72,7 @@ public class JniGraphics extends VirtualModule<VM> {
     private static long getInfo(Emulator<?> emulator, VM vm) {
         RegisterContext context = emulator.getContext();
         Pointer env = context.getPointerArg(0);
-        UnicornPointer jbitmap = context.getPointerArg(1);
+        UnidbgPointer jbitmap = context.getPointerArg(1);
         Pointer info = context.getPointerArg(2);
         Bitmap bitmap = vm.getObject(jbitmap.toIntPeer());
         BufferedImage image = bitmap.getValue();
@@ -92,7 +90,7 @@ public class JniGraphics extends VirtualModule<VM> {
     private static long lockPixels(Emulator<?> emulator, VM vm) {
         RegisterContext context = emulator.getContext();
         Pointer env = context.getPointerArg(0);
-        UnicornPointer jbitmap = context.getPointerArg(1);
+        UnidbgPointer jbitmap = context.getPointerArg(1);
         Pointer addrPtr = context.getPointerArg(2);
         Bitmap bitmap = vm.getObject(jbitmap.toIntPeer());
         BufferedImage image = bitmap.getValue();
@@ -110,12 +108,8 @@ public class JniGraphics extends VirtualModule<VM> {
                 }
             }
 
-            Memory memory = emulator.getMemory();
-            MemoryBlock memoryBlock = memory.malloc(image.getWidth() * image.getHeight() * 4);
-            Pointer pointer = memoryBlock.getPointer();
-            pointer.write(0, buffer.array(), 0, buffer.capacity());
+            Pointer pointer = bitmap.lockPixels(emulator, image, buffer);
             addrPtr.setPointer(0, pointer);
-            bitmap.memoryBlock = memoryBlock;
 
             if (log.isDebugEnabled()) {
                 log.debug(Inspector.inspectString(buffer.array(), "AndroidBitmap_lockPixels buffer=" + buffer));
@@ -131,13 +125,9 @@ public class JniGraphics extends VirtualModule<VM> {
     private static long unlockPixels(Emulator<?> emulator, VM vm) {
         RegisterContext context = emulator.getContext();
         Pointer env = context.getPointerArg(0);
-        UnicornPointer jbitmap = context.getPointerArg(1);
+        UnidbgPointer jbitmap = context.getPointerArg(1);
         Bitmap bitmap = vm.getObject(jbitmap.toIntPeer());
-        MemoryBlock memoryBlock = bitmap.memoryBlock;
-        if (memoryBlock != null) {
-            memoryBlock.free(true);
-            bitmap.memoryBlock = null;
-        }
+        bitmap.unlockPixels();
         if (log.isDebugEnabled()) {
             log.debug("AndroidBitmap_unlockPixels env=" + env + ", bitmap=" + bitmap);
         }

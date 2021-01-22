@@ -2,7 +2,10 @@ package com.github.unidbg.linux.android.dvm;
 
 import com.github.unidbg.Emulator;
 import com.github.unidbg.Module;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.linux.android.dvm.array.ByteArray;
+import com.github.unidbg.memory.MemoryBlock;
+import com.github.unidbg.pointer.UnidbgPointer;
+import com.sun.jna.Pointer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,6 +51,11 @@ public class DvmObject<T> extends Hashable {
     }
 
     @SuppressWarnings("unused")
+    public boolean callJniMethodBoolean(Emulator<?> emulator, String method, Object...args) {
+        return callJniMethodInt(emulator, method, args) == VM.JNI_TRUE;
+    }
+
+    @SuppressWarnings("unused")
     public int callJniMethodInt(Emulator<?> emulator, String method, Object...args) {
         if (objectType == null) {
             throw new IllegalStateException("objectType is null");
@@ -85,7 +93,7 @@ public class DvmObject<T> extends Hashable {
     }
 
     protected static Number callJniMethod(Emulator<?> emulator, VM vm, DvmClass objectType, DvmObject<?> thisObj, String method, Object...args) {
-        UnicornPointer fnPtr = objectType.findNativeFunction(emulator, method);
+        UnidbgPointer fnPtr = objectType.findNativeFunction(emulator, method);
         vm.addLocalObject(thisObj);
         List<Object> list = new ArrayList<>(10);
         list.add(vm.getJNIEnv());
@@ -101,6 +109,16 @@ public class DvmObject<T> extends Hashable {
                     if(arg instanceof DvmObject) {
                         vm.addLocalObject((DvmObject<?>) arg);
                     }
+                    continue;
+                } else if (arg instanceof String) {
+                    StringObject str = new StringObject(vm, (String) arg);
+                    list.add(str.hashCode());
+                    vm.addLocalObject(str);
+                    continue;
+                } else if(arg instanceof byte[]) {
+                    ByteArray array = new ByteArray(vm, (byte[]) arg);
+                    list.add(array.hashCode());
+                    vm.addLocalObject(array);
                     continue;
                 }
 
@@ -120,4 +138,27 @@ public class DvmObject<T> extends Hashable {
 
         return objectType.getName() + "@" + Integer.toHexString(hashCode());
     }
+
+    protected MemoryBlock memoryBlock;
+
+    protected final UnidbgPointer allocateMemoryBlock(Emulator<?> emulator, int length) {
+        if (memoryBlock != null) {
+            throw new IllegalStateException("Already allocated array memory");
+        }
+
+        memoryBlock = emulator.getMemory().malloc(length);
+        return memoryBlock.getPointer();
+    }
+
+    protected final void freeMemoryBlock(Pointer pointer) {
+        if (this.memoryBlock != null && (pointer == null || this.memoryBlock.isSame(pointer))) {
+            this.memoryBlock.free(true);
+            this.memoryBlock = null;
+        }
+    }
+
+    final void onDeleteRef() {
+        freeMemoryBlock(null);
+    }
+
 }

@@ -1,8 +1,8 @@
 package com.github.unidbg.file;
 
 import com.github.unidbg.Emulator;
+import com.github.unidbg.arm.backend.Backend;
 import com.sun.jna.Pointer;
-import unicorn.Unicorn;
 
 import java.io.IOException;
 
@@ -16,7 +16,7 @@ public interface FileIO {
 
     int write(byte[] data);
 
-    int read(Unicorn unicorn, Pointer buffer, int count);
+    int read(Backend backend, Pointer buffer, int count);
 
     int fcntl(Emulator<?> emulator, int cmd, long arg);
 
@@ -46,11 +46,11 @@ public interface FileIO {
 
     int getsockname(Pointer addr, Pointer addrlen);
 
-    long mmap2(Unicorn unicorn, long addr, int aligned, int prot, int offset, int length) throws IOException;
+    long mmap2(Emulator<?> emulator, long addr, int aligned, int prot, int offset, int length) throws IOException;
 
     int llseek(long offset, Pointer result, int whence);
 
-    int recvfrom(Unicorn unicorn, Pointer buf, int len, int flags, Pointer src_addr, Pointer addrlen);
+    int recvfrom(Backend backend, Pointer buf, int len, int flags, Pointer src_addr, Pointer addrlen);
 
     String getPath();
 }

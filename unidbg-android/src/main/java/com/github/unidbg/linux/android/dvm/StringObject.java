@@ -1,7 +1,5 @@
 package com.github.unidbg.linux.android.dvm;
 
-import com.github.unidbg.memory.MemoryBlock;
-
 public class StringObject extends DvmObject<String> {
 
     public StringObject(VM vm, String value) {
@@ -11,8 +9,6 @@ public class StringObject extends DvmObject<String> {
             throw new NullPointerException();
         }
     }
-
-    MemoryBlock memoryBlock;
 
     @Override
     public String toString() {

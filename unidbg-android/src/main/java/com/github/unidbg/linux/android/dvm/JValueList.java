@@ -1,27 +1,28 @@
 package com.github.unidbg.linux.android.dvm;
 
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.github.unidbg.utils.Inspector;
 import com.sun.jna.Pointer;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
+import java.util.Arrays;
+
 class JValueList extends VaList {
 
     private static final Log log = LogFactory.getLog(JValueList.class);
 
-    JValueList(BaseVM vm, UnicornPointer jvalue, DvmMethod method) {
+    JValueList(BaseVM vm, UnidbgPointer jvalue, DvmMethod method) {
         super(vm, method, method.decodeArgsShorty());
 
-        String shorty = method.decodeArgsShorty();
+        Shorty[] shorties = method.decodeArgsShorty();
 
-        char[] chars = shorty.toCharArray();
-        if (chars.length > 0) {
+        if (shorties.length > 0) {
             Pointer pointer = jvalue;
-            for (char c : chars) {
-                switch (c) {
+            for (Shorty shorty : shorties) {
+                switch (shorty.getType()) {
                     case 'L':
-                        UnicornPointer ptr = (UnicornPointer) pointer.getPointer(0);
+                        UnidbgPointer ptr = (UnidbgPointer) pointer.getPointer(0);
                         buffer.putInt((int) ptr.toUIntPeer());
                         break;
                     case 'B': {
@@ -60,7 +61,7 @@ class JValueList extends VaList {
                         break;
                     }
                     default:
-                        throw new IllegalStateException("c=" + c);
+                        throw new IllegalStateException("c=" + shorty.getType());
                 }
 
                 pointer = pointer.share(8);
@@ -69,7 +70,7 @@ class JValueList extends VaList {
 
         buffer.flip();
         if (log.isDebugEnabled()) {
-            log.debug(Inspector.inspectString(buffer.array(), "JValueList args=" + method.args + ", shorty=" + shorty));
+            log.debug(Inspector.inspectString(buffer.array(), "JValueList args=" + method.args + ", shorty=" + Arrays.toString(shorties)));
         }
     }
 

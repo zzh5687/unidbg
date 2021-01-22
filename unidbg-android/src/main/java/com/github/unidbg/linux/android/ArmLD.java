@@ -4,40 +4,39 @@ import com.github.unidbg.Emulator;
 import com.github.unidbg.Module;
 import com.github.unidbg.Symbol;
 import com.github.unidbg.arm.ArmSvc;
+import com.github.unidbg.arm.backend.Backend;
 import com.github.unidbg.linux.LinuxModule;
 import com.github.unidbg.memory.Memory;
 import com.github.unidbg.memory.SvcMemory;
-import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.pointer.UnidbgPointer;
 import com.github.unidbg.spi.Dlfcn;
 import com.github.unidbg.spi.InitFunction;
 import com.github.unidbg.unix.struct.DlInfo;
 import com.sun.jna.Pointer;
-import keystone.Keystone;
-import keystone.KeystoneArchitecture;
-import keystone.KeystoneEncoded;
-import keystone.KeystoneMode;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import unicorn.ArmConst;
-import unicorn.Unicorn;
 
-import java.util.Arrays;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 public class ArmLD extends Dlfcn {
 
     private static final Log log = LogFactory.getLog(ArmLD.class);
 
-    private Unicorn unicorn;
+    private final Backend backend;
 
-    ArmLD(Unicorn unicorn, SvcMemory svcMemory) {
+    ArmLD(Backend backend, SvcMemory svcMemory) {
         super(svcMemory);
-        this.unicorn = unicorn;
+        this.backend = backend;
     }
 
     @Override
     public long hook(final SvcMemory svcMemory, String libraryName, String symbolName, long old) {
         if ("libdl.so".equals(libraryName)) {
-            log.debug("link " + symbolName + ", old=0x" + Long.toHexString(old));
+            if (log.isDebugEnabled()) {
+                log.debug("link " + symbolName + ", old=0x" + Long.toHexString(old));
+            }
             switch (symbolName) {
                 case "dlerror":
                     return svcMemory.registerSvc(new ArmSvc() {
@@ -50,7 +49,7 @@ public class ArmLD extends Dlfcn {
                     return svcMemory.registerSvc(new ArmSvc() {
                         @Override
                         public long handle(Emulator<?> emulator) {
-                            long handle = ((Number) emulator.getUnicorn().reg_read(ArmConst.UC_ARM_REG_R0)).intValue() & 0xffffffffL;
+                            long handle = emulator.getBackend().reg_read(ArmConst.UC_ARM_REG_R0).intValue() & 0xffffffffL;
                             if (log.isDebugEnabled()) {
                                 log.debug("dlclose handle=0x" + Long.toHexString(handle));
                             }
@@ -60,26 +59,25 @@ public class ArmLD extends Dlfcn {
                 case "dlopen":
                     return svcMemory.registerSvc(new ArmSvc() {
                         @Override
-                        public UnicornPointer onRegister(SvcMemory svcMemory, int svcNumber) {
-                            try (Keystone keystone = new Keystone(KeystoneArchitecture.Arm, KeystoneMode.Arm)) {
-                                KeystoneEncoded encoded = keystone.assemble(Arrays.asList(
-                                        "push {r4-r7, lr}",
-                                        "svc #0x" + Integer.toHexString(svcNumber),
-                                        "pop {r7}", // manipulated stack in dlopen
-                                        "cmp r7, #0",
-                                        "subne lr, pc, #16", // jump to pop {r7}
-                                        "bxne r7", // call init array
-                                        "pop {r0, r4-r7, pc}")); // with return address
-                                byte[] code = encoded.getMachineCode();
-                                UnicornPointer pointer = svcMemory.allocate(code.length, "dlopen");
-                                pointer.write(0, code, 0, code.length);
-                                return pointer;
-                            }
+                        public UnidbgPointer onRegister(SvcMemory svcMemory, int svcNumber) {
+                            ByteBuffer buffer = ByteBuffer.allocate(28);
+                            buffer.order(ByteOrder.LITTLE_ENDIAN);
+                            buffer.putInt(0xe92d40f0); // push {r4-r7, lr}
+                            buffer.putInt(ArmSvc.assembleSvc(svcNumber)); // svc #svcNumber
+                            buffer.putInt(0xe49d7004); // pop {r7}
+                            buffer.putInt(0xe3570000); // cmp r7, #0
+                            buffer.putInt(0x124fe010); // subne lr, pc, #16
+                            buffer.putInt(0x112fff17); // bxne r7
+                            buffer.putInt(0xe8bd80f1); // pop {r0, r4-r7, pc} with return address
+                            byte[] code = buffer.array();
+                            UnidbgPointer pointer = svcMemory.allocate(code.length, "dlopen");
+                            pointer.write(code);
+                            return pointer;
                         }
                         @Override
                         public long handle(Emulator<?> emulator) {
-                            Pointer filename = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
-                            int flags = ((Number) emulator.getUnicorn().reg_read(ArmConst.UC_ARM_REG_R1)).intValue();
+                            Pointer filename = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
+                            int flags = emulator.getBackend().reg_read(ArmConst.UC_ARM_REG_R1).intValue();
                             if (log.isDebugEnabled()) {
                                 log.debug("dlopen filename=" + filename.getString(0) + ", flags=" + flags);
                             }
@@ -90,8 +88,8 @@ public class ArmLD extends Dlfcn {
                     return svcMemory.registerSvc(new ArmSvc() {
                         @Override
                         public long handle(Emulator<?> emulator) {
-                            long addr = ((Number) emulator.getUnicorn().reg_read(ArmConst.UC_ARM_REG_R0)).intValue() & 0xffffffffL;
-                            Pointer info = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+                            long addr = emulator.getBackend().reg_read(ArmConst.UC_ARM_REG_R0).intValue() & 0xffffffffL;
+                            Pointer info = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
                             if (log.isDebugEnabled()) {
                                 log.debug("dladdr addr=0x" + Long.toHexString(addr) + ", info=" + info);
                             }
@@ -104,10 +102,10 @@ public class ArmLD extends Dlfcn {
 
                             DlInfo dlInfo = new DlInfo(info);
                             dlInfo.dli_fname = module.createPathMemory(svcMemory);
-                            dlInfo.dli_fbase = UnicornPointer.pointer(emulator, module.base);
+                            dlInfo.dli_fbase = UnidbgPointer.pointer(emulator, module.base);
                             if (symbol != null) {
                                 dlInfo.dli_sname = symbol.createNameMemory(svcMemory);
-                                dlInfo.dli_saddr = UnicornPointer.pointer(emulator, symbol.getAddress());
+                                dlInfo.dli_saddr = UnidbgPointer.pointer(emulator, symbol.getAddress());
                             }
                             dlInfo.pack();
                             return 1;
@@ -117,8 +115,8 @@ public class ArmLD extends Dlfcn {
                     return svcMemory.registerSvc(new ArmSvc() {
                         @Override
                         public long handle(Emulator<?> emulator) {
-                            long handle = ((Number) emulator.getUnicorn().reg_read(ArmConst.UC_ARM_REG_R0)).intValue() & 0xffffffffL;
-                            Pointer symbol = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+                            long handle = emulator.getBackend().reg_read(ArmConst.UC_ARM_REG_R0).intValue() & 0xffffffffL;
+                            Pointer symbol = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
                             if (log.isDebugEnabled()) {
                                 log.debug("dlsym handle=0x" + Long.toHexString(handle) + ", symbol=" + symbol.getString(0));
                             }
@@ -129,8 +127,8 @@ public class ArmLD extends Dlfcn {
                     return svcMemory.registerSvc(new ArmSvc() {
                         @Override
                         public long handle(Emulator<?> emulator) {
-                            Pointer pc = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
-                            Pointer pcount = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+                            Pointer pc = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
+                            Pointer pcount = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
                             if (log.isDebugEnabled()) {
                                 log.debug("dl_unwind_find_exidx pc" + pc + ", pcount=" + pcount);
                             }
@@ -143,7 +141,7 @@ public class ArmLD extends Dlfcn {
     }
 
     private long dlopen(Memory memory, String filename, Emulator<?> emulator) {
-        Pointer pointer = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_SP);
+        Pointer pointer = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_SP);
         try {
             Module module = memory.dlopen(filename, false);
             pointer = pointer.share(-4); // return value
@@ -184,7 +182,7 @@ public class ArmLD extends Dlfcn {
                 return module.base;
             }
         } finally {
-            unicorn.reg_write(ArmConst.UC_ARM_REG_SP, ((UnicornPointer) pointer).peer);
+            backend.reg_write(ArmConst.UC_ARM_REG_SP, ((UnidbgPointer) pointer).peer);
         }
     }
 
